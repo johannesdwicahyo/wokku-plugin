@@ -12,12 +12,16 @@
   "keywords": ["paas", "deploy", "dokku", "heroku", "wokku"],
   "userConfig": {
     "WOKKU_API_URL": {
-      "description": "Wokku API endpoint (default: https://wokku.dev/api/v1)",
+      "type": "string",
+      "title": "Wokku API URL",
+      "description": "Wokku API endpoint (default: https://wokku.dev/api/v1 for managed cloud)",
       "sensitive": false,
       "default": "https://wokku.dev/api/v1"
     },
     "WOKKU_API_TOKEN": {
-      "description": "Your Wokku API token (create at wokku.dev/dashboard/profile)",
+      "type": "string",
+      "title": "Wokku API Token",
+      "description": "Your Wokku API token (create one at wokku.dev/dashboard/profile)",
       "sensitive": true
     }
   }
