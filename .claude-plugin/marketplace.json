@@ -1,0 +1,27 @@
+{
+  "name": "wokku",
+  "version": "1.0.0",
+  "description": "Official Wokku plugin — manage your Wokku PaaS apps from Claude Code",
+  "owner": {
+    "name": "Johannes Dwicahyo",
+    "url": "https://wokku.dev"
+  },
+  "homepage": "https://wokku.dev",
+  "repository": "https://github.com/johannesdwicahyo/wokku-plugin",
+  "license": "MIT",
+  "keywords": ["paas", "deploy", "dokku", "heroku"],
+  "plugins": [
+    {
+      "name": "wokku",
+      "source": "./plugins/wokku",
+      "description": "Deploy and manage apps on Wokku with 57 tools and guided workflows",
+      "version": "1.0.0",
+      "author": {
+        "name": "Johannes Dwicahyo"
+      },
+      "homepage": "https://wokku.dev/docs/mcp/setup",
+      "license": "MIT",
+      "keywords": ["paas", "deploy", "dokku"]
+    }
+  ]
+}
