@@ -58,7 +58,17 @@ def handle_tool(name, args)
   when "wokku_list_apps" then api_request(:get, "/apps")
   when "wokku_get_app" then api_request(:get, "/apps/#{args['app_id']}")
   when "wokku_create_app"
-    api_request(:post, "/apps", { name: args["name"], server_id: args["server_id"], deploy_branch: args["deploy_branch"] || "main" })
+    body = {
+      name: args["name"],
+      server_id: args["server_id"],
+      deploy_branch: args["deploy_branch"] || "main"
+    }
+    # Bundle v2 — optional box-model fields (ignored by pre-bundle-v2 servers)
+    body[:box_size]                = args["box_size"]                if args["box_size"]
+    body[:enabled_shared_engines]  = args["enabled_shared_engines"]  if args["enabled_shared_engines"].is_a?(Array)
+    body[:dedicated_db_engine]     = args["dedicated_db_engine"]     if args["dedicated_db_engine"]
+    body[:add_dedicated_redis]     = true                            if args["add_dedicated_redis"]
+    api_request(:post, "/apps", body)
   when "wokku_update_app"
     body = {}
     body[:name] = args["name"] if args["name"]
@@ -93,6 +103,13 @@ def handle_tool(name, args)
   when "wokku_list_addons" then api_request(:get, "/apps/#{args['app_id']}/addons")
   when "wokku_add_addon" then api_request(:post, "/apps/#{args['app_id']}/addons", { service_type: args["service_type"], name: args["name"] })
   when "wokku_remove_addon" then api_request(:delete, "/apps/#{args['app_id']}/addons/#{args['addon_id']}")
+  # Bundle v2 — shared addon enable/disable + dedicated upgrade
+  when "wokku_enable_shared_addon"
+    api_request(:post, "/apps/#{args['app_id']}/addons/shared", { engine: args["engine"] })
+  when "wokku_disable_shared_addon"
+    api_request(:delete, "/apps/#{args['app_id']}/addons/shared/#{args['engine']}")
+  when "wokku_upgrade_dedicated_addon"
+    api_request(:post, "/apps/#{args['app_id']}/addons/dedicated", { engine: args["engine"] })
   when "wokku_list_log_drains" then api_request(:get, "/apps/#{args['app_id']}/log_drains")
   when "wokku_add_log_drain" then api_request(:post, "/apps/#{args['app_id']}/log_drains", { url: args["url"] })
   when "wokku_remove_log_drain" then api_request(:delete, "/apps/#{args['app_id']}/log_drains/#{args['drain_id']}")
@@ -134,7 +151,7 @@ TOOLS = [
   { name: "wokku_server_status", description: "Get server health (CPU, memory, disk)", inputSchema: { type: "object", properties: { server_id: { type: "string", description: "The server ID" } }, required: [ "server_id" ] } },
   { name: "wokku_list_apps", description: "List all applications", inputSchema: { type: "object", properties: {} } },
   { name: "wokku_get_app", description: "Get app details", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID or name" } }, required: [ "app_id" ] } },
-  { name: "wokku_create_app", description: "Create a new application", inputSchema: { type: "object", properties: { name: { type: "string", description: "App name" }, server_id: { type: "integer", description: "Server ID" }, deploy_branch: { type: "string", description: "Deploy branch (default: main)" } }, required: [ "name", "server_id" ] } },
+  { name: "wokku_create_app", description: "Create a new application. Bundle v2 (optional): box_size + enabled_shared_engines + dedicated_db_engine + add_dedicated_redis configure the box at creation. Older servers ignore these fields.", inputSchema: { type: "object", properties: { name: { type: "string", description: "App name" }, server_id: { type: "integer", description: "Server ID" }, deploy_branch: { type: "string", description: "Deploy branch (default: main)" }, box_size: { type: "string", description: "Bundle v2: sleeping|small|medium|large|xlarge", enum: [ "sleeping", "small", "medium", "large", "xlarge" ] }, enabled_shared_engines: { type: "array", items: { type: "string", enum: [ "postgres", "redis", "memcached", "rabbitmq", "meilisearch" ] }, description: "Bundle v2: shared engines to attach at creation. Free plan limited to postgres+redis." }, dedicated_db_engine: { type: "string", enum: [ "postgres", "mysql", "mongodb" ], description: "Bundle v2: spin up a dedicated database alongside the box (paid plans only)" }, add_dedicated_redis: { type: "boolean", description: "Bundle v2: spin up a dedicated Redis alongside the box (paid plans only)" } }, required: [ "name", "server_id" ] } },
   { name: "wokku_update_app", description: "Update app settings (rename, change branch)", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" }, name: { type: "string", description: "New name" }, deploy_branch: { type: "string", description: "New branch" } }, required: [ "app_id" ] } },
   { name: "wokku_delete_app", description: "Delete an application", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" } }, required: [ "app_id" ] } },
   { name: "wokku_restart_app", description: "Restart an application", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" } }, required: [ "app_id" ] } },
@@ -159,8 +176,12 @@ TOOLS = [
   { name: "wokku_list_deploys", description: "List deploy history", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" } }, required: [ "app_id" ] } },
   { name: "wokku_get_deploy", description: "Get deploy details", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" }, deploy_id: { type: "string", description: "The deploy ID" } }, required: [ "app_id", "deploy_id" ] } },
   { name: "wokku_list_addons", description: "List linked databases", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" } }, required: [ "app_id" ] } },
-  { name: "wokku_add_addon", description: "Add a database to an app", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" }, service_type: { type: "string", description: "Database type" }, name: { type: "string", description: "Optional name" } }, required: [ "app_id", "service_type" ] } },
+  { name: "wokku_add_addon", description: "[LEGACY pre-Bundle-v2] Add a database to an app. Bundle v2 servers return 410 — use wokku_enable_shared_addon or wokku_upgrade_dedicated_addon instead.", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" }, service_type: { type: "string", description: "Database type" }, name: { type: "string", description: "Optional name" } }, required: [ "app_id", "service_type" ] } },
   { name: "wokku_remove_addon", description: "Remove a database from an app", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" }, addon_id: { type: "string", description: "The addon ID" } }, required: [ "app_id", "addon_id" ] } },
+  # Bundle v2 — shared addon enable/disable + dedicated upgrade
+  { name: "wokku_enable_shared_addon", description: "Bundle v2: enable a shared engine on an app's box. Free plan limited to postgres+redis; other plans can pick from all 5.", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" }, engine: { type: "string", enum: [ "postgres", "redis", "memcached", "rabbitmq", "meilisearch" ], description: "Shared engine to enable" } }, required: [ "app_id", "engine" ] } },
+  { name: "wokku_disable_shared_addon", description: "Bundle v2: disable a shared engine on an app's box. Destroys the shared tenant + data.", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" }, engine: { type: "string", enum: [ "postgres", "redis", "memcached", "rabbitmq", "meilisearch" ], description: "Shared engine to disable" } }, required: [ "app_id", "engine" ] } },
+  { name: "wokku_upgrade_dedicated_addon", description: "Bundle v2: upgrade a box to a dedicated database (postgres|mysql|mongodb) or Redis. Pg/Redis migrate from shared (data preserved). MySQL/MongoDB are fresh-create. Quota: 3 per plan; size follows the box size.", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" }, engine: { type: "string", enum: [ "postgres", "mysql", "mongodb", "redis" ], description: "Engine to provision as dedicated" } }, required: [ "app_id", "engine" ] } },
   { name: "wokku_list_log_drains", description: "List log drains", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" } }, required: [ "app_id" ] } },
   { name: "wokku_add_log_drain", description: "Add a log drain", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" }, url: { type: "string", description: "Drain URL" } }, required: [ "app_id", "url" ] } },
   { name: "wokku_remove_log_drain", description: "Remove a log drain", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" }, drain_id: { type: "string", description: "The drain ID" } }, required: [ "app_id", "drain_id" ] } },

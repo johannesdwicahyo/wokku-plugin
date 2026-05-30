@@ -1,7 +1,7 @@
 {
   "name": "wokku",
-  "version": "1.0.0",
-  "description": "Deploy and manage apps on Wokku — the open-source Heroku alternative. 57 tools for apps, databases, domains, SSL, backups, and more.",
+  "version": "1.1.0",
+  "description": "Deploy and manage apps on Wokku — the open-source Heroku alternative. 61 tools for apps, databases, domains, SSL, backups, and Bundle v2 box/shared-addon/dedicated-upgrade flows.",
   "author": {
     "name": "Johannes Dwicahyo",
     "url": "https://wokku.dev"
