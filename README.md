@@ -1,8 +1,10 @@
 # Wokku Plugin for Claude Code
 
-Official [Wokku](https://wokku.cloud) plugin for [Claude Code](https://docs.anthropic.com/en/docs/claude-code).
+Official [Wokku Cloud](https://wokku.cloud) plugin for [Claude Code](https://docs.anthropic.com/en/docs/claude-code).
 
-Deploy and manage apps on Wokku — the open-source Heroku alternative — directly from Claude Code using natural language.
+Deploy and manage apps on Wokku Cloud directly from Claude Code using natural language.
+
+> **Wokku Cloud only.** This plugin wraps the Wokku REST API, which ships only with the managed Wokku Cloud product. The open-source Wokku web UI ([github.com/johannesdwicahyo/wokku](https://github.com/johannesdwicahyo/wokku)) does not expose `/api/v1`, so the plugin cannot point at a self-hosted Wokku install.
 
 ## Features
 
@@ -59,21 +61,10 @@ The `add-database` skill was updated to prompt between *shared free*
 (default, instant) and *dedicated paid* (consumes one of the 3 dedicated
 slots on Solo / Pro plans) when you ask for a new DB.
 
-## Self-Hosted Wokku
-
-If you run your own Wokku instance, set `WOKKU_API_URL` to your instance URL:
-
-```
-WOKKU_API_URL=https://paas.mycompany.com/api/v1
-```
-
-The REST API is a managed-cloud feature. To enable it on a self-host, see the
-[wokku self-host docs](https://wokku.cloud/docs/self-host#enabling-the-api).
-
 ## Requirements
 
 - Ruby 3.0+ (only stdlib, no gems)
-- A Wokku account (free at [wokku.cloud](https://wokku.cloud)) or self-hosted instance
+- A Wokku Cloud account (free at [wokku.cloud](https://wokku.cloud))
 
 ## License
 
