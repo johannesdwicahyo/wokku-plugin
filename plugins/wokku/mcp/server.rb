@@ -181,6 +181,10 @@ def handle_tool(name, args)
     api_request(:get, "/apps/#{args['app_id']}/previews")
   when "wokku_destroy_preview"
     api_request(:delete, "/apps/#{args['app_id']}/previews/#{args['pr_number']}")
+  when "wokku_get_current_plan"
+    api_request(:get, "/billing/current_plan")
+  when "wokku_get_usage"
+    api_request(:get, "/billing/usage")
   else
     { error: "Unknown tool: #{name}" }
   end
@@ -456,6 +460,24 @@ TOOLS = [
         pr_number: { type: "integer", description: "PR number (e.g. 42)" }
       },
       required: [ "app_id", "pr_number" ]
+    }
+  },
+  {
+    name: "wokku_get_current_plan",
+    description: "Get the user's current Wokku plan name + key limits (max apps, max databases).",
+    inputSchema: {
+      type: "object",
+      properties: {},
+      required: []
+    }
+  },
+  {
+    name: "wokku_get_usage",
+    description: "Get the user's month-to-date usage summary (apps, databases, hours elapsed, cost dollars) for the current billing period.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+      required: []
     }
   }
 ].freeze
