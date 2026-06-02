@@ -157,6 +157,18 @@ def handle_tool(name, args)
     api_request(:get, "/apps/#{args['app_id']}/vitals")
   when "wokku_get_database_monitor"
     api_request(:get, "/databases/#{args['database_id']}/monitor")
+  # Cluster B — app lifecycle (rename / clone / lock / unlock / transfer)
+  when "wokku_rename_app"
+    api_request(:patch, "/apps/#{args['app_id']}/rename", { name: args["new_name"] })
+  when "wokku_clone_app"
+    api_request(:post, "/apps/#{args['app_id']}/clone",
+                { name: args["new_name"], skip_deploy: args.fetch("skip_deploy", true) })
+  when "wokku_lock_app"
+    api_request(:post, "/apps/#{args['app_id']}/lock")
+  when "wokku_unlock_app"
+    api_request(:post, "/apps/#{args['app_id']}/unlock")
+  when "wokku_transfer_app"
+    api_request(:post, "/apps/#{args['app_id']}/transfer", { recipient_email: args["recipient_email"] })
   else
     { error: "Unknown tool: #{name}" }
   end
@@ -320,6 +332,62 @@ TOOLS = [
       type: "object",
       properties: { database_id: { type: "string", description: "The database ID" } },
       required: [ "database_id" ]
+    }
+  },
+  # Cluster B — app lifecycle (rename / clone / lock / unlock / transfer)
+  {
+    name: "wokku_rename_app",
+    description: "Rename an app. The dokku-side rename preserves domains, but this BREAKS deployed bookmarks to the app's auto-generated wokku.cloud subdomain.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        app_id:   { type: "string", description: "The current app ID" },
+        new_name: { type: "string", description: "New app name (lowercase, 2-50 chars, alphanumeric and hyphens)" }
+      },
+      required: [ "app_id", "new_name" ]
+    }
+  },
+  {
+    name: "wokku_clone_app",
+    description: "Clone an app's config + buildpacks + nginx. Does NOT carry env vars, databases, or storage. The new AppRecord points to the same server.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        app_id:      { type: "string", description: "Source app ID" },
+        new_name:    { type: "string", description: "New app name" },
+        skip_deploy: { type: "boolean", description: "If true (default), dokku won't try to redeploy after cloning" }
+      },
+      required: [ "app_id", "new_name" ]
+    }
+  },
+  {
+    name: "wokku_lock_app",
+    description: "Set the dokku deploy lock on an app. While locked, both git push and API-triggered deploys will be refused.",
+    inputSchema: {
+      type: "object",
+      properties: { app_id: { type: "string", description: "The app ID" } },
+      required: [ "app_id" ]
+    }
+  },
+  {
+    name: "wokku_unlock_app",
+    description: "Release the dokku deploy lock on an app.",
+    inputSchema: {
+      type: "object",
+      properties: { app_id: { type: "string", description: "The app ID" } },
+      required: [ "app_id" ]
+    }
+  },
+  {
+    name: "wokku_transfer_app",
+    description: "Initiate transfer of an app to another Wokku user (identified by email). Recipient must accept via the emailed link before ownership moves.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        app_id:          { type: "string", description: "The app ID" },
+        recipient_email: { type: "string", description: "Recipient's existing Wokku account email" }
+      },
+      required: [ "app_id", "recipient_email" ]
     }
   }
 ].freeze
