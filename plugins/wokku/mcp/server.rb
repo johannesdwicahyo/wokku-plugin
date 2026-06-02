@@ -149,6 +149,14 @@ def handle_tool(name, args)
     api_request(:post, "/notifications", { channel: args["channel"], event: args["event"], config: args["config"] })
   when "wokku_delete_notification" then api_request(:delete, "/notifications/#{args['notification_id']}")
   when "wokku_list_activities" then api_request(:get, "/activities?limit=#{args['limit'] || 20}")
+  when "wokku_get_app_metrics"
+    api_request(:get, "/apps/#{args['app_id']}/metrics")
+  when "wokku_get_app_monitor"
+    api_request(:get, "/apps/#{args['app_id']}/monitor")
+  when "wokku_get_app_vitals"
+    api_request(:get, "/apps/#{args['app_id']}/vitals")
+  when "wokku_get_database_monitor"
+    api_request(:get, "/databases/#{args['database_id']}/monitor")
   else
     { error: "Unknown tool: #{name}" }
   end
@@ -276,6 +284,42 @@ TOOLS = [
         app_id: { type: "string", description: "The app ID" }
       },
       required: [ "app_id" ]
+    }
+  },
+  {
+    name: "wokku_get_app_metrics",
+    description: "Get an app's stored CPU + memory metrics (last 60 minute rows + last 24 hourly buckets). Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: { app_id: { type: "string", description: "The app ID" } },
+      required: [ "app_id" ]
+    }
+  },
+  {
+    name: "wokku_get_app_monitor",
+    description: "Get HTTP request stats for an app (last 24h: totals, 5-min buckets, top 10 slow URLs). Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: { app_id: { type: "string", description: "The app ID" } },
+      required: [ "app_id" ]
+    }
+  },
+  {
+    name: "wokku_get_app_vitals",
+    description: "Get Core Web Vitals (CLS/LCP/INP/FCP/TTFB) p50/p75/p95 for an app — last 7 days, latest + history per metric. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: { app_id: { type: "string", description: "The app ID" } },
+      required: [ "app_id" ]
+    }
+  },
+  {
+    name: "wokku_get_database_monitor",
+    description: "Get the latest database stats snapshot (active connections, cache hit ratio, size, top queries). Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: { database_id: { type: "string", description: "The database ID" } },
+      required: [ "database_id" ]
     }
   }
 ].freeze
