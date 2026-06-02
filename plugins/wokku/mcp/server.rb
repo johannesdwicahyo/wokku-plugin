@@ -110,6 +110,16 @@ def handle_tool(name, args)
     api_request(:delete, "/apps/#{args['app_id']}/addons/shared/#{args['engine']}")
   when "wokku_upgrade_dedicated_addon"
     api_request(:post, "/apps/#{args['app_id']}/addons/dedicated", { engine: args["engine"] })
+  when "wokku_set_https"
+    api_request(:patch, "/apps/#{args['app_id']}/https", { enabled: args["enabled"] })
+  when "wokku_set_cdn"
+    api_request(:patch, "/apps/#{args['app_id']}/cdn", { enabled: args["enabled"] })
+  when "wokku_set_maintenance"
+    api_request(:patch, "/apps/#{args['app_id']}/maintenance", { enabled: args["enabled"] })
+  when "wokku_github_connect"
+    api_request(:post, "/apps/#{args['app_id']}/github_connect", { repo: args["repo"], branch: args["branch"] || "main" })
+  when "wokku_github_disconnect"
+    api_request(:delete, "/apps/#{args['app_id']}/github_disconnect")
   when "wokku_list_log_drains" then api_request(:get, "/apps/#{args['app_id']}/log_drains")
   when "wokku_add_log_drain" then api_request(:post, "/apps/#{args['app_id']}/log_drains", { url: args["url"] })
   when "wokku_remove_log_drain" then api_request(:delete, "/apps/#{args['app_id']}/log_drains/#{args['drain_id']}")
@@ -207,7 +217,67 @@ TOOLS = [
   { name: "wokku_list_notifications", description: "List notification channels", inputSchema: { type: "object", properties: {} } },
   { name: "wokku_create_notification", description: "Create a notification channel", inputSchema: { type: "object", properties: { channel: { type: "string", description: "Channel type" }, event: { type: "string", description: "Event type" }, config: { type: "object", description: "Channel config" } }, required: [ "channel", "event", "config" ] } },
   { name: "wokku_delete_notification", description: "Delete a notification channel", inputSchema: { type: "object", properties: { notification_id: { type: "string", description: "The notification ID" } }, required: [ "notification_id" ] } },
-  { name: "wokku_list_activities", description: "List recent activity log", inputSchema: { type: "object", properties: { limit: { type: "integer", description: "Number of entries (default: 20)" } } } }
+  { name: "wokku_list_activities", description: "List recent activity log", inputSchema: { type: "object", properties: { limit: { type: "integer", description: "Number of entries (default: 20)" } } } },
+  {
+    name: "wokku_set_https",
+    description: "Enable or disable HTTPS redirect for an app.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        app_id:  { type: "string", description: "The app ID" },
+        enabled: { type: "boolean", description: "true to enable, false to disable" }
+      },
+      required: [ "app_id", "enabled" ]
+    }
+  },
+  {
+    name: "wokku_set_cdn",
+    description: "Enable or disable the Cloudflare CDN proxy on an app's DNS record. DNS propagation may take a minute.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        app_id:  { type: "string", description: "The app ID" },
+        enabled: { type: "boolean", description: "true to enable, false to disable" }
+      },
+      required: [ "app_id", "enabled" ]
+    }
+  },
+  {
+    name: "wokku_set_maintenance",
+    description: "Enable or disable maintenance mode for an app (serves a 503 page instead of the app).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        app_id:  { type: "string", description: "The app ID" },
+        enabled: { type: "boolean", description: "true to enable, false to disable" }
+      },
+      required: [ "app_id", "enabled" ]
+    }
+  },
+  {
+    name: "wokku_github_connect",
+    description: "Connect a GitHub repository to an app for auto-deploy.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        app_id: { type: "string", description: "The app ID" },
+        repo:   { type: "string", description: "owner/repo (e.g. johannes/myapp)" },
+        branch: { type: "string", description: "Branch to track (default: main)" }
+      },
+      required: [ "app_id", "repo" ]
+    }
+  },
+  {
+    name: "wokku_github_disconnect",
+    description: "Disconnect the GitHub repository from an app.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        app_id: { type: "string", description: "The app ID" }
+      },
+      required: [ "app_id" ]
+    }
+  }
 ].freeze
 
 $stdout.sync = true
