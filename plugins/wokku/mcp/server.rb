@@ -169,6 +169,18 @@ def handle_tool(name, args)
     api_request(:post, "/apps/#{args['app_id']}/unlock")
   when "wokku_transfer_app"
     api_request(:post, "/apps/#{args['app_id']}/transfer", { recipient_email: args["recipient_email"] })
+  when "wokku_list_scheduled_tasks"
+    api_request(:get, "/apps/#{args['app_id']}/scheduled_tasks")
+  when "wokku_create_scheduled_task"
+    body = { command: args["command"], schedule: args["schedule"] }
+    body[:description] = args["description"] if args.key?("description")
+    api_request(:post, "/apps/#{args['app_id']}/scheduled_tasks", body)
+  when "wokku_delete_scheduled_task"
+    api_request(:delete, "/apps/#{args['app_id']}/scheduled_tasks/#{args['task_id']}")
+  when "wokku_list_previews"
+    api_request(:get, "/apps/#{args['app_id']}/previews")
+  when "wokku_destroy_preview"
+    api_request(:delete, "/apps/#{args['app_id']}/previews/#{args['pr_number']}")
   else
     { error: "Unknown tool: #{name}" }
   end
@@ -388,6 +400,62 @@ TOOLS = [
         recipient_email: { type: "string", description: "Recipient's existing Wokku account email" }
       },
       required: [ "app_id", "recipient_email" ]
+    }
+  },
+  {
+    name: "wokku_list_scheduled_tasks",
+    description: "List scheduled tasks (cron entries) for an app.",
+    inputSchema: {
+      type: "object",
+      properties: { app_id: { type: "string", description: "The app ID" } },
+      required: [ "app_id" ]
+    }
+  },
+  {
+    name: "wokku_create_scheduled_task",
+    description: "Add a scheduled task (cron entry) to an app. REQUIRES Pro plan — returns 403 with an upgrade hint otherwise.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        app_id:      { type: "string", description: "The app ID" },
+        command:     { type: "string", description: "Shell command to run" },
+        schedule:    { type: "string", description: "Cron expression (e.g. '*/5 * * * *')" },
+        description: { type: "string", description: "Optional human-readable description" }
+      },
+      required: [ "app_id", "command", "schedule" ]
+    }
+  },
+  {
+    name: "wokku_delete_scheduled_task",
+    description: "Delete a scheduled task by id.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        app_id:  { type: "string", description: "The app ID" },
+        task_id: { type: "string", description: "The scheduled task ID" }
+      },
+      required: [ "app_id", "task_id" ]
+    }
+  },
+  {
+    name: "wokku_list_previews",
+    description: "List PR preview apps for a parent app (each preview is a child AppRecord with a pr_number).",
+    inputSchema: {
+      type: "object",
+      properties: { app_id: { type: "string", description: "The parent app ID" } },
+      required: [ "app_id" ]
+    }
+  },
+  {
+    name: "wokku_destroy_preview",
+    description: "Queue destruction of a PR preview by its PR number. Async — actual teardown runs in Preview::CleanupJob.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        app_id:    { type: "string", description: "The parent app ID" },
+        pr_number: { type: "integer", description: "PR number (e.g. 42)" }
+      },
+      required: [ "app_id", "pr_number" ]
     }
   }
 ].freeze
