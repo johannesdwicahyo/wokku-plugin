@@ -7,9 +7,11 @@
 # Quick install:
 #   curl -fsSL https://raw.githubusercontent.com/johannesdwicahyo/wokku/main/mcp/server.rb -o wokku-mcp.rb
 #   claude mcp add wokku \
-#     -e WOKKU_API_URL=https://wokku.cloud/api/v1 \
 #     -e WOKKU_API_TOKEN=your-token-here \
 #     -- ruby wokku-mcp.rb
+#
+# The API endpoint is fixed to wokku.cloud (managed cloud only) — only
+# the token is configurable.
 #
 # Full docs: https://github.com/johannesdwicahyo/wokku/blob/main/mcp/README.md
 
@@ -17,7 +19,10 @@ require "json"
 require "net/http"
 require "uri"
 
-WOKKU_API_URL = ENV.fetch("WOKKU_API_URL", "https://wokku.cloud/api/v1")
+# Wokku is a managed-cloud product; the MCP server always talks to
+# wokku.cloud. The endpoint is intentionally NOT configurable (no env
+# override) — mirrors the CLI, and avoids the wokku.dev footgun.
+WOKKU_API_URL = "https://wokku.cloud/api/v1"
 WOKKU_API_TOKEN = ENV.fetch("WOKKU_API_TOKEN", "")
 
 def api_request(method, path, body = nil)
