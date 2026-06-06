@@ -19,7 +19,7 @@
       "author": {
         "name": "Johannes Dwicahyo"
       },
-      "homepage": "https://wokku.dev/docs/mcp/setup",
+      "homepage": "https://wokku.cloud/docs/mcp/setup",
       "license": "MIT",
       "keywords": ["paas", "deploy", "dokku"]
     }

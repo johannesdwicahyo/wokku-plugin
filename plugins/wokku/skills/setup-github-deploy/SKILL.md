@@ -20,7 +20,7 @@ Connect a GitHub repo to a Wokku app so pushes to a branch trigger automatic dep
    - GitHub OAuth flow requires the Web UI (Claude Code can't complete OAuth)
    - Tell the user:
      > "GitHub connection requires an OAuth authorization. Please:
-     > 1. Go to https://wokku.dev/dashboard/apps/{app_id}
+     > 1. Go to https://wokku.cloud/dashboard/apps/{app_id}
      > 2. Click 'Connect GitHub'
      > 3. Select your repository and branch
      > 4. Click 'Save'"

@@ -54,6 +54,6 @@ Guided workflow for deploying the current project to Wokku as a new app.
 
 ## Tips
 
-- Free tier is 1 eco container + 1 mini database. If user hits the limit, suggest upgrading at wokku.dev/dashboard/billing
+- Free tier is 1 eco container + 1 mini database. If user hits the limit, suggest upgrading at wokku.cloud/dashboard/billing
 - For Rails apps, remind user to run `bin/rails credentials:edit` locally to set the master key
 - For Docker apps, the `Dockerfile` takes precedence over buildpack detection

@@ -7,7 +7,7 @@
 # Quick install:
 #   curl -fsSL https://raw.githubusercontent.com/johannesdwicahyo/wokku/main/mcp/server.rb -o wokku-mcp.rb
 #   claude mcp add wokku \
-#     -e WOKKU_API_URL=https://wokku.dev/api/v1 \
+#     -e WOKKU_API_URL=https://wokku.cloud/api/v1 \
 #     -e WOKKU_API_TOKEN=your-token-here \
 #     -- ruby wokku-mcp.rb
 #
@@ -17,7 +17,7 @@ require "json"
 require "net/http"
 require "uri"
 
-WOKKU_API_URL = ENV.fetch("WOKKU_API_URL", "https://wokku.dev/api/v1")
+WOKKU_API_URL = ENV.fetch("WOKKU_API_URL", "https://wokku.cloud/api/v1")
 WOKKU_API_TOKEN = ENV.fetch("WOKKU_API_TOKEN", "")
 
 def api_request(method, path, body = nil)
