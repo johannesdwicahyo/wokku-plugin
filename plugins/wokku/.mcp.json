@@ -4,7 +4,6 @@
       "command": "ruby",
       "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/server.rb"],
       "env": {
-        "WOKKU_API_URL": "${user_config.WOKKU_API_URL}",
         "WOKKU_API_TOKEN": "${user_config.WOKKU_API_TOKEN}"
       }
     }
