@@ -1,7 +1,7 @@
 {
   "name": "wokku",
-  "version": "1.2.0",
-  "description": "Deploy and manage apps on Wokku — the open-source Heroku alternative. 61 tools for apps, databases, domains, SSL, backups, and Bundle v2 box/shared-addon/dedicated-upgrade flows.",
+  "version": "1.3.0",
+  "description": "Deploy and manage apps on Wokku \u2014 the open-source Heroku alternative. 61 tools for apps, databases, domains, SSL, backups, and Bundle v2 box/shared-addon/dedicated-upgrade flows.",
   "author": {
     "name": "Johannes Dwicahyo",
     "url": "https://wokku.dev"
@@ -9,7 +9,13 @@
   "homepage": "https://wokku.cloud/docs/mcp/setup",
   "repository": "https://github.com/johannesdwicahyo/wokku-plugin",
   "license": "MIT",
-  "keywords": ["paas", "deploy", "dokku", "heroku", "wokku"],
+  "keywords": [
+    "paas",
+    "deploy",
+    "dokku",
+    "heroku",
+    "wokku"
+  ],
   "userConfig": {
     "WOKKU_API_TOKEN": {
       "type": "string",

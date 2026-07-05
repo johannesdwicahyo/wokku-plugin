@@ -7,25 +7,55 @@
 # Quick install:
 #   curl -fsSL https://raw.githubusercontent.com/johannesdwicahyo/wokku/main/mcp/server.rb -o wokku-mcp.rb
 #   claude mcp add wokku \
+#     -e WOKKU_API_URL=https://wokku.cloud/api/v1 \
 #     -e WOKKU_API_TOKEN=your-token-here \
 #     -- ruby wokku-mcp.rb
-#
-# The API endpoint is fixed to wokku.cloud (managed cloud only) — only
-# the token is configurable.
 #
 # Full docs: https://github.com/johannesdwicahyo/wokku/blob/main/mcp/README.md
 
 require "json"
 require "net/http"
 require "uri"
+require "tmpdir"
 
-# Wokku is a managed-cloud product; the MCP server always talks to
-# wokku.cloud. The endpoint is intentionally NOT configurable (no env
-# override) — mirrors the CLI, and avoids the wokku.dev footgun.
-WOKKU_API_URL = "https://wokku.cloud/api/v1"
-WOKKU_API_TOKEN = ENV.fetch("WOKKU_API_TOKEN", "")
+WOKKU_API_URL = ENV.fetch("WOKKU_API_URL", "https://wokku.cloud/api/v1")
+
+# Token resolution: explicit env wins, then the wokku CLI's saved login
+# (~/.wokku/config.json, written by `wokku auth:login`'s device flow).
+# The MCP server runs on the user's machine, so one browser-hop login
+# authenticates BOTH surfaces — no manual token pasting for MCP.
+WOKKU_API_TOKEN = begin
+  env_token = ENV.fetch("WOKKU_API_TOKEN", "")
+  if !env_token.empty?
+    env_token
+  else
+    cli_config = File.join(Dir.home, ".wokku", "config.json")
+    if File.readable?(cli_config)
+      JSON.parse(File.read(cli_config))["token"].to_s rescue ""
+    else
+      ""
+    end
+  end
+end
+NO_TOKEN_HINT = "No Wokku token found. Run `wokku auth:login` (one browser hop; saves to " \
+                "~/.wokku/config.json, which this MCP server reads too) or set WOKKU_API_TOKEN " \
+                "in the plugin env.".freeze
+
+# Sent as X-Wokku-Client-Version on every request so the API's client_version
+# concern can flag outdated MCP servers (see MIN_VERSIONS in
+# app/controllers/concerns/client_version.rb) and /doctor can surface it.
+SERVER_VERSION = "1.2.0"
+
+# Log endpoint to stderr so Claude Code's MCP debug logs show which
+# Wokku instance (managed vs self-hosted OSS) the plugin is talking to.
+$stderr.puts "wokku-mcp: connecting to #{WOKKU_API_URL} (#{WOKKU_API_URL.include?('wokku.cloud') ? 'managed' : 'self-hosted'})"
+$stderr.puts "wokku-mcp: token source: #{ENV["WOKKU_API_TOKEN"].to_s.empty? ? (WOKKU_API_TOKEN.empty? ? 'NONE' : '~/.wokku/config.json (CLI login)') : 'plugin env'}"
 
 def api_request(method, path, body = nil)
+  # Short-circuit locally when unauthenticated: better than a network
+  # round-trip, and the hint names the one command that fixes it.
+  return { error: "Missing Wokku token", error_code: "missing_token", hint: NO_TOKEN_HINT } if WOKKU_API_TOKEN.empty?
+
   uri = URI("#{WOKKU_API_URL}#{path}")
   http = Net::HTTP.new(uri.host, uri.port)
   http.use_ssl = uri.scheme == "https"
@@ -42,7 +72,9 @@ def api_request(method, path, body = nil)
 
   request["Authorization"] = "Bearer #{WOKKU_API_TOKEN}"
   request["Content-Type"] = "application/json"
-  request["User-Agent"] = "wokku-mcp/1.0"
+  request["User-Agent"] = "wokku-mcp/#{SERVER_VERSION}"
+  request["X-Wokku-Client"] = "mcp"
+  request["X-Wokku-Client-Version"] = SERVER_VERSION
   request.body = body.to_json if body
 
   response = http.request(request)
@@ -55,25 +87,204 @@ rescue => e
   { error: e.message }
 end
 
+# wokku_deploy_tarball — Track A Phase 4a Task 6. Deploys a local directory
+# without a git remote: tar it up, request a presigned upload slot, PUT the
+# tarball straight to the bucket (no auth header — the URL itself is the
+# credential), create the deploy from the resulting archive_key, then poll
+# deploys#show until it reaches a terminal state.
+DEPLOY_POLL_INTERVAL = 3
+# TarballDeployJob's own build timeout is 15 minutes (see app/jobs/
+# tarball_deploy_job.rb); poll a little past that so we always see the
+# job's own timed_out transition rather than giving up first.
+DEPLOY_POLL_MAX_ATTEMPTS = (16 * 60) / DEPLOY_POLL_INTERVAL
+TERMINAL_DEPLOY_STATUSES = %w[succeeded failed timed_out].freeze
+
+def error_result?(result)
+  result.is_a?(Hash) && (result["error"] || result[:error])
+end
+
+# Builds a .tar.gz of `path` at `archive_path`. Uses `git archive` (which
+# only ever includes committed, non-ignored files) when `path` is a git
+# repo; otherwise falls back to plain `tar` with sensible excludes so
+# .git/node_modules/tmp/log never end up in the uploaded archive.
+def build_tarball!(path, archive_path)
+  if Dir.exist?(File.join(path, ".git"))
+    ok = system("git", "-C", path, "archive", "--format=tar.gz", "--output=#{archive_path}", "HEAD")
+    raise "git archive failed (is #{path} a git repo with at least one commit?)" unless ok
+  else
+    ok = system("tar", "-czf", archive_path,
+      "--exclude=.git", "--exclude=node_modules", "--exclude=tmp", "--exclude=log",
+      "-C", path, ".")
+    raise "tar failed while archiving #{path}" unless ok
+  end
+end
+
+# `git archive HEAD` deploys the committed tree only — any uncommitted
+# changes in the worktree are silently left out, which is easy to miss
+# (the tool still "succeeds"). When `path` is a git repo with a dirty
+# worktree, returns a warning string to surface to the model; nil
+# otherwise (clean tree, non-git directory, or git isn't available).
+def dirty_worktree_warning(path)
+  return nil unless Dir.exist?(File.join(path, ".git"))
+
+  porcelain = IO.popen([ "git", "-C", path, "status", "--porcelain" ], &:read)
+  return nil unless $?&.success?
+  return nil if porcelain.to_s.strip.empty?
+
+  "worktree has uncommitted changes — deployed HEAD only; commit first to include them"
+rescue
+  nil
+end
+
+# PUTs the tarball straight to the presigned URL. No Authorization header —
+# the signature embedded in the URL query string is the credential; adding
+# our own would just break the signature. Returns nil on success, or an
+# error hash on failure.
+def upload_tarball(upload_url, archive_path)
+  uri = URI(upload_url)
+  http = Net::HTTP.new(uri.host, uri.port)
+  http.use_ssl = uri.scheme == "https"
+  http.open_timeout = 10
+  http.read_timeout = 120
+
+  request = Net::HTTP::Put.new(uri)
+  request["Content-Type"] = "application/gzip"
+  request.body = File.binread(archive_path)
+
+  response = http.request(request)
+  return nil if response.is_a?(Net::HTTPSuccess)
+
+  { error: "tarball upload failed: HTTP #{response.code} #{response.message}" }
+rescue => e
+  { error: "tarball upload failed: #{e.message}" }
+end
+
+# A transient network blip during polling (timeout, connection refused,
+# DNS hiccup — anything api_request rescues into {error: "..."}) must never
+# be mistaken for "the deploy has no status, so we're done": that used to
+# silently return {deploy_id: nil, status: nil}, discarding the actual error
+# and telling the model the deploy vanished. Instead we retry through
+# transient errors (same poll interval) up to MAX_CONSECUTIVE_POLL_ERRORS
+# in a row; a real response resets the counter. Only after that many
+# consecutive failures do we give up, and even then we preserve the error
+# message plus a hint to check the deploy directly — we never fabricate a
+# status.
+MAX_CONSECUTIVE_POLL_ERRORS = 5
+
+def poll_deploy(app_id, deploy_id)
+  result = nil
+  consecutive_errors = 0
+
+  DEPLOY_POLL_MAX_ATTEMPTS.times do
+    result = api_request(:get, "/apps/#{app_id}/deploys/#{deploy_id}")
+
+    if error_result?(result) && !status_present?(result)
+      consecutive_errors += 1
+      if consecutive_errors >= MAX_CONSECUTIVE_POLL_ERRORS
+        return summarize_deploy(result).merge(
+          deploy_id: deploy_id,
+          polling_errored: true,
+          note: "Polling failed #{consecutive_errors} times in a row and gave up. The deploy may still be running server-side — check wokku_get_deploy with deploy_id #{deploy_id}."
+        )
+      end
+
+      sleep DEPLOY_POLL_INTERVAL
+      next
+    end
+
+    consecutive_errors = 0
+    status = status_present?(result) ? (result["status"] || result[:status]) : nil
+    # Not the retried "error, no status" shape (handled above), but also not
+    # a recognizable {status: ...} deploy payload — an unexpected shape
+    # (non-Hash body, or a Hash with neither error nor status). Surface it
+    # as-is rather than either discarding it or spinning for the full poll
+    # budget on something that will never change.
+    return summarize_deploy(result) if !result.is_a?(Hash) || status.nil? || TERMINAL_DEPLOY_STATUSES.include?(status.to_s)
+
+    sleep DEPLOY_POLL_INTERVAL
+  end
+
+  summarize_deploy(result).merge(polling_timed_out: true, note: "Gave up polling after ~16 minutes; the deploy may still be running server-side. Check wokku_get_deploy.")
+end
+
+def status_present?(result)
+  result.is_a?(Hash) && !(result["status"] || result[:status]).nil?
+end
+
+def summarize_deploy(result)
+  return result unless result.is_a?(Hash)
+
+  error = result["error"] || result[:error]
+  if error && !status_present?(result)
+    out = { error: error }
+    out[:error_code] = result["error_code"] || result[:error_code] if result["error_code"] || result[:error_code]
+    out[:hint] = result["hint"] || result[:hint] if result["hint"] || result[:hint]
+    return out
+  end
+
+  log = result["log"] || result[:log]
+  out = { deploy_id: result["id"] || result[:id], status: result["status"] || result[:status] }
+  out[:log_tail] = log.to_s.split("\n").last(50).join("\n") unless log.to_s.empty?
+  out
+end
+
+def deploy_tarball(args)
+  app_id = args["app_id"].to_s
+  path = args["path"].to_s
+  return { error: "app_id is required" } if app_id.empty?
+  return { error: "path is required" } if path.empty?
+  return { error: "path does not exist or is not a directory: #{path}" } unless Dir.exist?(path)
+
+  warning = dirty_worktree_warning(path)
+
+  result = Dir.mktmpdir("wokku-deploy") do |tmp|
+    archive_path = File.join(tmp, "deploy.tar.gz")
+    build_tarball!(path, archive_path)
+
+    slot = api_request(:post, "/apps/#{app_id}/deploys/uploads")
+    next slot if error_result?(slot)
+
+    archive_key = slot["archive_key"]
+    upload_url = slot["upload_url"]
+    unless archive_key && upload_url
+      next { error: "upload slot response missing archive_key/upload_url: #{slot.inspect}" }
+    end
+
+    upload_error = upload_tarball(upload_url, archive_path)
+    next upload_error if upload_error
+
+    deploy = api_request(:post, "/apps/#{app_id}/deploys", { archive_key: archive_key })
+    next deploy if error_result?(deploy)
+
+    deploy_id = deploy["deploy_id"]
+    next({ error: "deploy response missing deploy_id: #{deploy.inspect}" }) unless deploy_id
+
+    poll_deploy(app_id, deploy_id)
+  end
+
+  # Non-blocking: the deploy already happened (or already failed for its
+  # own reasons) by the time we know about the dirty worktree, so we
+  # thread the warning into whatever result — success or error — is about
+  # to be returned, rather than gating on it.
+  result = result.merge(warning: warning) if warning && result.is_a?(Hash)
+  result
+rescue => e
+  # The rescue path must keep the dirty-worktree warning too — an archive
+  # failure on a dirty tree is exactly when the user needs to see it.
+  error = { error: "wokku_deploy_tarball failed: #{e.message}" }
+  defined?(warning) && warning ? error.merge(warning: warning) : error
+end
+
 def handle_tool(name, args)
   case name
+  when "wokku_doctor" then api_request(:get, "/doctor")
   when "wokku_list_servers" then api_request(:get, "/servers")
   when "wokku_get_server" then api_request(:get, "/servers/#{args['server_id']}")
   when "wokku_server_status" then api_request(:get, "/servers/#{args['server_id']}/status")
   when "wokku_list_apps" then api_request(:get, "/apps")
   when "wokku_get_app" then api_request(:get, "/apps/#{args['app_id']}")
   when "wokku_create_app"
-    body = {
-      name: args["name"],
-      server_id: args["server_id"],
-      deploy_branch: args["deploy_branch"] || "main"
-    }
-    # Bundle v2 — optional box-model fields (ignored by pre-bundle-v2 servers)
-    body[:box_size]                = args["box_size"]                if args["box_size"]
-    body[:enabled_shared_engines]  = args["enabled_shared_engines"]  if args["enabled_shared_engines"].is_a?(Array)
-    body[:dedicated_db_engine]     = args["dedicated_db_engine"]     if args["dedicated_db_engine"]
-    body[:add_dedicated_redis]     = true                            if args["add_dedicated_redis"]
-    api_request(:post, "/apps", body)
+    api_request(:post, "/apps", { name: args["name"], server_id: args["server_id"], deploy_branch: args["deploy_branch"] || "main" })
   when "wokku_update_app"
     body = {}
     body[:name] = args["name"] if args["name"]
@@ -105,26 +316,10 @@ def handle_tool(name, args)
   when "wokku_get_logs" then api_request(:get, "/apps/#{args['app_id']}/logs?lines=#{args['lines'] || 100}")
   when "wokku_list_deploys" then api_request(:get, "/apps/#{args['app_id']}/deploys")
   when "wokku_get_deploy" then api_request(:get, "/apps/#{args['app_id']}/deploys/#{args['deploy_id']}")
+  when "wokku_deploy_tarball" then deploy_tarball(args)
   when "wokku_list_addons" then api_request(:get, "/apps/#{args['app_id']}/addons")
   when "wokku_add_addon" then api_request(:post, "/apps/#{args['app_id']}/addons", { service_type: args["service_type"], name: args["name"] })
   when "wokku_remove_addon" then api_request(:delete, "/apps/#{args['app_id']}/addons/#{args['addon_id']}")
-  # Bundle v2 — shared addon enable/disable + dedicated upgrade
-  when "wokku_enable_shared_addon"
-    api_request(:post, "/apps/#{args['app_id']}/addons/shared", { engine: args["engine"] })
-  when "wokku_disable_shared_addon"
-    api_request(:delete, "/apps/#{args['app_id']}/addons/shared/#{args['engine']}")
-  when "wokku_upgrade_dedicated_addon"
-    api_request(:post, "/apps/#{args['app_id']}/addons/dedicated", { engine: args["engine"] })
-  when "wokku_set_https"
-    api_request(:patch, "/apps/#{args['app_id']}/https", { enabled: args["enabled"] })
-  when "wokku_set_cdn"
-    api_request(:patch, "/apps/#{args['app_id']}/cdn", { enabled: args["enabled"] })
-  when "wokku_set_maintenance"
-    api_request(:patch, "/apps/#{args['app_id']}/maintenance", { enabled: args["enabled"] })
-  when "wokku_github_connect"
-    api_request(:post, "/apps/#{args['app_id']}/github_connect", { repo: args["repo"], branch: args["branch"] || "main" })
-  when "wokku_github_disconnect"
-    api_request(:delete, "/apps/#{args['app_id']}/github_disconnect")
   when "wokku_list_log_drains" then api_request(:get, "/apps/#{args['app_id']}/log_drains")
   when "wokku_add_log_drain" then api_request(:post, "/apps/#{args['app_id']}/log_drains", { url: args["url"] })
   when "wokku_remove_log_drain" then api_request(:delete, "/apps/#{args['app_id']}/log_drains/#{args['drain_id']}")
@@ -154,55 +349,20 @@ def handle_tool(name, args)
     api_request(:post, "/notifications", { channel: args["channel"], event: args["event"], config: args["config"] })
   when "wokku_delete_notification" then api_request(:delete, "/notifications/#{args['notification_id']}")
   when "wokku_list_activities" then api_request(:get, "/activities?limit=#{args['limit'] || 20}")
-  when "wokku_get_app_metrics"
-    api_request(:get, "/apps/#{args['app_id']}/metrics")
-  when "wokku_get_app_monitor"
-    api_request(:get, "/apps/#{args['app_id']}/monitor")
-  when "wokku_get_app_vitals"
-    api_request(:get, "/apps/#{args['app_id']}/vitals")
-  when "wokku_get_database_monitor"
-    api_request(:get, "/databases/#{args['database_id']}/monitor")
-  # Cluster B — app lifecycle (rename / clone / lock / unlock / transfer)
-  when "wokku_rename_app"
-    api_request(:patch, "/apps/#{args['app_id']}/rename", { name: args["new_name"] })
-  when "wokku_clone_app"
-    api_request(:post, "/apps/#{args['app_id']}/clone",
-                { name: args["new_name"], skip_deploy: args.fetch("skip_deploy", true) })
-  when "wokku_lock_app"
-    api_request(:post, "/apps/#{args['app_id']}/lock")
-  when "wokku_unlock_app"
-    api_request(:post, "/apps/#{args['app_id']}/unlock")
-  when "wokku_transfer_app"
-    api_request(:post, "/apps/#{args['app_id']}/transfer", { recipient_email: args["recipient_email"] })
-  when "wokku_list_scheduled_tasks"
-    api_request(:get, "/apps/#{args['app_id']}/scheduled_tasks")
-  when "wokku_create_scheduled_task"
-    body = { command: args["command"], schedule: args["schedule"] }
-    body[:description] = args["description"] if args.key?("description")
-    api_request(:post, "/apps/#{args['app_id']}/scheduled_tasks", body)
-  when "wokku_delete_scheduled_task"
-    api_request(:delete, "/apps/#{args['app_id']}/scheduled_tasks/#{args['task_id']}")
-  when "wokku_list_previews"
-    api_request(:get, "/apps/#{args['app_id']}/previews")
-  when "wokku_destroy_preview"
-    api_request(:delete, "/apps/#{args['app_id']}/previews/#{args['pr_number']}")
-  when "wokku_get_current_plan"
-    api_request(:get, "/billing/current_plan")
-  when "wokku_get_usage"
-    api_request(:get, "/billing/usage")
   else
     { error: "Unknown tool: #{name}" }
   end
 end
 
-# Tool definitions — 55 tools, 100% coverage of Wokku API v1
+# Tool definitions — 60 tools, 100% coverage of Wokku API v1
 TOOLS = [
+  { name: "wokku_doctor", description: "Whole-chain self-diagnosis: auth, client version, host health, and app state in one call. Run this first when anything is failing or confusing, before digging into individual tools.", inputSchema: { type: "object", properties: {} } },
   { name: "wokku_list_servers", description: "List all connected Dokku servers", inputSchema: { type: "object", properties: {} } },
   { name: "wokku_get_server", description: "Get server details", inputSchema: { type: "object", properties: { server_id: { type: "string", description: "The server ID" } }, required: [ "server_id" ] } },
   { name: "wokku_server_status", description: "Get server health (CPU, memory, disk)", inputSchema: { type: "object", properties: { server_id: { type: "string", description: "The server ID" } }, required: [ "server_id" ] } },
   { name: "wokku_list_apps", description: "List all applications", inputSchema: { type: "object", properties: {} } },
   { name: "wokku_get_app", description: "Get app details", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID or name" } }, required: [ "app_id" ] } },
-  { name: "wokku_create_app", description: "Create a new application. Bundle v2 (optional): box_size + enabled_shared_engines + dedicated_db_engine + add_dedicated_redis configure the box at creation. Older servers ignore these fields.", inputSchema: { type: "object", properties: { name: { type: "string", description: "App name" }, server_id: { type: "integer", description: "Server ID" }, deploy_branch: { type: "string", description: "Deploy branch (default: main)" }, box_size: { type: "string", description: "Bundle v2: sleeping|small|medium|large|xlarge", enum: [ "sleeping", "small", "medium", "large", "xlarge" ] }, enabled_shared_engines: { type: "array", items: { type: "string", enum: [ "postgres", "redis", "memcached", "rabbitmq", "meilisearch" ] }, description: "Bundle v2: shared engines to attach at creation. Free plan limited to postgres+redis." }, dedicated_db_engine: { type: "string", enum: [ "postgres", "mysql", "mongodb" ], description: "Bundle v2: spin up a dedicated database alongside the box (paid plans only)" }, add_dedicated_redis: { type: "boolean", description: "Bundle v2: spin up a dedicated Redis alongside the box (paid plans only)" } }, required: [ "name", "server_id" ] } },
+  { name: "wokku_create_app", description: "Create a new application", inputSchema: { type: "object", properties: { name: { type: "string", description: "App name" }, server_id: { type: "integer", description: "Server ID" }, deploy_branch: { type: "string", description: "Deploy branch (default: main)" } }, required: [ "name", "server_id" ] } },
   { name: "wokku_update_app", description: "Update app settings (rename, change branch)", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" }, name: { type: "string", description: "New name" }, deploy_branch: { type: "string", description: "New branch" } }, required: [ "app_id" ] } },
   { name: "wokku_delete_app", description: "Delete an application", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" } }, required: [ "app_id" ] } },
   { name: "wokku_restart_app", description: "Restart an application", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" } }, required: [ "app_id" ] } },
@@ -226,13 +386,10 @@ TOOLS = [
   { name: "wokku_get_logs", description: "Get application logs", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" }, lines: { type: "integer", description: "Number of lines (default: 100)" } }, required: [ "app_id" ] } },
   { name: "wokku_list_deploys", description: "List deploy history", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" } }, required: [ "app_id" ] } },
   { name: "wokku_get_deploy", description: "Get deploy details", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" }, deploy_id: { type: "string", description: "The deploy ID" } }, required: [ "app_id", "deploy_id" ] } },
+  { name: "wokku_deploy_tarball", description: "Deploy an app from a local directory without a git remote: tars `path` (git archive when it's a git repo, else tar excluding .git/node_modules/tmp/log), uploads it, creates the deploy, and polls until it finishes. Returns the final status and a log tail.", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID or name" }, path: { type: "string", description: "Local directory to deploy" } }, required: [ "app_id", "path" ] } },
   { name: "wokku_list_addons", description: "List linked databases", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" } }, required: [ "app_id" ] } },
-  { name: "wokku_add_addon", description: "[LEGACY pre-Bundle-v2] Add a database to an app. Bundle v2 servers return 410 — use wokku_enable_shared_addon or wokku_upgrade_dedicated_addon instead.", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" }, service_type: { type: "string", description: "Database type" }, name: { type: "string", description: "Optional name" } }, required: [ "app_id", "service_type" ] } },
+  { name: "wokku_add_addon", description: "Add a database to an app", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" }, service_type: { type: "string", description: "Database type" }, name: { type: "string", description: "Optional name" } }, required: [ "app_id", "service_type" ] } },
   { name: "wokku_remove_addon", description: "Remove a database from an app", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" }, addon_id: { type: "string", description: "The addon ID" } }, required: [ "app_id", "addon_id" ] } },
-  # Bundle v2 — shared addon enable/disable + dedicated upgrade
-  { name: "wokku_enable_shared_addon", description: "Bundle v2: enable a shared engine on an app's box. Free plan limited to postgres+redis; other plans can pick from all 5.", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" }, engine: { type: "string", enum: [ "postgres", "redis", "memcached", "rabbitmq", "meilisearch" ], description: "Shared engine to enable" } }, required: [ "app_id", "engine" ] } },
-  { name: "wokku_disable_shared_addon", description: "Bundle v2: disable a shared engine on an app's box. Destroys the shared tenant + data.", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" }, engine: { type: "string", enum: [ "postgres", "redis", "memcached", "rabbitmq", "meilisearch" ], description: "Shared engine to disable" } }, required: [ "app_id", "engine" ] } },
-  { name: "wokku_upgrade_dedicated_addon", description: "Bundle v2: upgrade a box to a dedicated database (postgres|mysql|mongodb) or Redis. Pg/Redis migrate from shared (data preserved). MySQL/MongoDB are fresh-create. Quota: 3 per plan; size follows the box size.", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" }, engine: { type: "string", enum: [ "postgres", "mysql", "mongodb", "redis" ], description: "Engine to provision as dedicated" } }, required: [ "app_id", "engine" ] } },
   { name: "wokku_list_log_drains", description: "List log drains", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" } }, required: [ "app_id" ] } },
   { name: "wokku_add_log_drain", description: "Add a log drain", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" }, url: { type: "string", description: "Drain URL" } }, required: [ "app_id", "url" ] } },
   { name: "wokku_remove_log_drain", description: "Remove a log drain", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" }, drain_id: { type: "string", description: "The drain ID" } }, required: [ "app_id", "drain_id" ] } },
@@ -258,234 +415,31 @@ TOOLS = [
   { name: "wokku_list_notifications", description: "List notification channels", inputSchema: { type: "object", properties: {} } },
   { name: "wokku_create_notification", description: "Create a notification channel", inputSchema: { type: "object", properties: { channel: { type: "string", description: "Channel type" }, event: { type: "string", description: "Event type" }, config: { type: "object", description: "Channel config" } }, required: [ "channel", "event", "config" ] } },
   { name: "wokku_delete_notification", description: "Delete a notification channel", inputSchema: { type: "object", properties: { notification_id: { type: "string", description: "The notification ID" } }, required: [ "notification_id" ] } },
-  { name: "wokku_list_activities", description: "List recent activity log", inputSchema: { type: "object", properties: { limit: { type: "integer", description: "Number of entries (default: 20)" } } } },
-  {
-    name: "wokku_set_https",
-    description: "Enable or disable HTTPS redirect for an app.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        app_id:  { type: "string", description: "The app ID" },
-        enabled: { type: "boolean", description: "true to enable, false to disable" }
-      },
-      required: [ "app_id", "enabled" ]
-    }
-  },
-  {
-    name: "wokku_set_cdn",
-    description: "Enable or disable the Cloudflare CDN proxy on an app's DNS record. DNS propagation may take a minute.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        app_id:  { type: "string", description: "The app ID" },
-        enabled: { type: "boolean", description: "true to enable, false to disable" }
-      },
-      required: [ "app_id", "enabled" ]
-    }
-  },
-  {
-    name: "wokku_set_maintenance",
-    description: "Enable or disable maintenance mode for an app (serves a 503 page instead of the app).",
-    inputSchema: {
-      type: "object",
-      properties: {
-        app_id:  { type: "string", description: "The app ID" },
-        enabled: { type: "boolean", description: "true to enable, false to disable" }
-      },
-      required: [ "app_id", "enabled" ]
-    }
-  },
-  {
-    name: "wokku_github_connect",
-    description: "Connect a GitHub repository to an app for auto-deploy.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        app_id: { type: "string", description: "The app ID" },
-        repo:   { type: "string", description: "owner/repo (e.g. johannes/myapp)" },
-        branch: { type: "string", description: "Branch to track (default: main)" }
-      },
-      required: [ "app_id", "repo" ]
-    }
-  },
-  {
-    name: "wokku_github_disconnect",
-    description: "Disconnect the GitHub repository from an app.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        app_id: { type: "string", description: "The app ID" }
-      },
-      required: [ "app_id" ]
-    }
-  },
-  {
-    name: "wokku_get_app_metrics",
-    description: "Get an app's stored CPU + memory metrics (last 60 minute rows + last 24 hourly buckets). Read-only.",
-    inputSchema: {
-      type: "object",
-      properties: { app_id: { type: "string", description: "The app ID" } },
-      required: [ "app_id" ]
-    }
-  },
-  {
-    name: "wokku_get_app_monitor",
-    description: "Get HTTP request stats for an app (last 24h: totals, 5-min buckets, top 10 slow URLs). Read-only.",
-    inputSchema: {
-      type: "object",
-      properties: { app_id: { type: "string", description: "The app ID" } },
-      required: [ "app_id" ]
-    }
-  },
-  {
-    name: "wokku_get_app_vitals",
-    description: "Get Core Web Vitals (CLS/LCP/INP/FCP/TTFB) p50/p75/p95 for an app — last 7 days, latest + history per metric. Read-only.",
-    inputSchema: {
-      type: "object",
-      properties: { app_id: { type: "string", description: "The app ID" } },
-      required: [ "app_id" ]
-    }
-  },
-  {
-    name: "wokku_get_database_monitor",
-    description: "Get the latest database stats snapshot (active connections, cache hit ratio, size, top queries). Read-only.",
-    inputSchema: {
-      type: "object",
-      properties: { database_id: { type: "string", description: "The database ID" } },
-      required: [ "database_id" ]
-    }
-  },
-  # Cluster B — app lifecycle (rename / clone / lock / unlock / transfer)
-  {
-    name: "wokku_rename_app",
-    description: "Rename an app. The dokku-side rename preserves domains, but this BREAKS deployed bookmarks to the app's auto-generated wokku.cloud subdomain.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        app_id:   { type: "string", description: "The current app ID" },
-        new_name: { type: "string", description: "New app name (lowercase, 2-50 chars, alphanumeric and hyphens)" }
-      },
-      required: [ "app_id", "new_name" ]
-    }
-  },
-  {
-    name: "wokku_clone_app",
-    description: "Clone an app's config + buildpacks + nginx. Does NOT carry env vars, databases, or storage. The new AppRecord points to the same server.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        app_id:      { type: "string", description: "Source app ID" },
-        new_name:    { type: "string", description: "New app name" },
-        skip_deploy: { type: "boolean", description: "If true (default), dokku won't try to redeploy after cloning" }
-      },
-      required: [ "app_id", "new_name" ]
-    }
-  },
-  {
-    name: "wokku_lock_app",
-    description: "Set the dokku deploy lock on an app. While locked, both git push and API-triggered deploys will be refused.",
-    inputSchema: {
-      type: "object",
-      properties: { app_id: { type: "string", description: "The app ID" } },
-      required: [ "app_id" ]
-    }
-  },
-  {
-    name: "wokku_unlock_app",
-    description: "Release the dokku deploy lock on an app.",
-    inputSchema: {
-      type: "object",
-      properties: { app_id: { type: "string", description: "The app ID" } },
-      required: [ "app_id" ]
-    }
-  },
-  {
-    name: "wokku_transfer_app",
-    description: "Initiate transfer of an app to another Wokku user (identified by email). Recipient must accept via the emailed link before ownership moves.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        app_id:          { type: "string", description: "The app ID" },
-        recipient_email: { type: "string", description: "Recipient's existing Wokku account email" }
-      },
-      required: [ "app_id", "recipient_email" ]
-    }
-  },
-  {
-    name: "wokku_list_scheduled_tasks",
-    description: "List scheduled tasks (cron entries) for an app.",
-    inputSchema: {
-      type: "object",
-      properties: { app_id: { type: "string", description: "The app ID" } },
-      required: [ "app_id" ]
-    }
-  },
-  {
-    name: "wokku_create_scheduled_task",
-    description: "Add a scheduled task (cron entry) to an app. REQUIRES Pro plan — returns 403 with an upgrade hint otherwise.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        app_id:      { type: "string", description: "The app ID" },
-        command:     { type: "string", description: "Shell command to run" },
-        schedule:    { type: "string", description: "Cron expression (e.g. '*/5 * * * *')" },
-        description: { type: "string", description: "Optional human-readable description" }
-      },
-      required: [ "app_id", "command", "schedule" ]
-    }
-  },
-  {
-    name: "wokku_delete_scheduled_task",
-    description: "Delete a scheduled task by id.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        app_id:  { type: "string", description: "The app ID" },
-        task_id: { type: "string", description: "The scheduled task ID" }
-      },
-      required: [ "app_id", "task_id" ]
-    }
-  },
-  {
-    name: "wokku_list_previews",
-    description: "List PR preview apps for a parent app (each preview is a child AppRecord with a pr_number).",
-    inputSchema: {
-      type: "object",
-      properties: { app_id: { type: "string", description: "The parent app ID" } },
-      required: [ "app_id" ]
-    }
-  },
-  {
-    name: "wokku_destroy_preview",
-    description: "Queue destruction of a PR preview by its PR number. Async — actual teardown runs in Preview::CleanupJob.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        app_id:    { type: "string", description: "The parent app ID" },
-        pr_number: { type: "integer", description: "PR number (e.g. 42)" }
-      },
-      required: [ "app_id", "pr_number" ]
-    }
-  },
-  {
-    name: "wokku_get_current_plan",
-    description: "Get the user's current Wokku plan name + key limits (max apps, max databases).",
-    inputSchema: {
-      type: "object",
-      properties: {},
-      required: []
-    }
-  },
-  {
-    name: "wokku_get_usage",
-    description: "Get the user's month-to-date usage summary (apps, databases, hours elapsed, cost dollars) for the current billing period.",
-    inputSchema: {
-      type: "object",
-      properties: {},
-      required: []
-    }
-  }
+  { name: "wokku_list_activities", description: "List recent activity log", inputSchema: { type: "object", properties: { limit: { type: "integer", description: "Number of entries (default: 20)" } } } }
 ].freeze
+
+# Turns a tool result into the text shown to Claude. Plain {error: "msg"}
+# bodies (old/self-hosted OSS servers, or the timeout/connection rescues in
+# api_request above) render as a bare "error: msg" line, same as before.
+# Typed error bodies — {error, error_code, hint, retryable} — additionally
+# surface the code/hint/retryable so Claude can act on them (e.g. retry a
+# deploy_lock_held error, or follow the hint) instead of just seeing a
+# human sentence.
+def format_result(result)
+  return JSON.pretty_generate(result) unless result.is_a?(Hash)
+
+  error = result["error"] || result[:error]
+  return JSON.pretty_generate(result) unless error
+
+  code = result["error_code"] || result[:error_code]
+  hint = result["hint"] || result[:hint]
+  retryable = result.key?("retryable") ? result["retryable"] : result[:retryable]
+
+  text = code ? "error (#{code}): #{error}" : "error: #{error}"
+  text += "\nhint: #{hint}" if hint
+  text += "\nretryable: #{retryable}" unless retryable.nil?
+  text
+end
 
 $stdout.sync = true
 $stderr.sync = true
@@ -500,7 +454,7 @@ loop do
 
     case msg["method"]
     when "initialize"
-      $stdout.puts JSON.generate({ jsonrpc: "2.0", id: id, result: { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "wokku", version: "1.0.0" } } })
+      $stdout.puts JSON.generate({ jsonrpc: "2.0", id: id, result: { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "wokku", version: SERVER_VERSION } } })
     when "notifications/initialized"
       # No response needed
     when "tools/list"
@@ -509,7 +463,7 @@ loop do
       tool_name = msg.dig("params", "name")
       arguments = msg.dig("params", "arguments") || {}
       result = handle_tool(tool_name, arguments)
-      $stdout.puts JSON.generate({ jsonrpc: "2.0", id: id, result: { content: [ { type: "text", text: JSON.pretty_generate(result) } ] } })
+      $stdout.puts JSON.generate({ jsonrpc: "2.0", id: id, result: { content: [ { type: "text", text: format_result(result) } ] } })
     else
       $stdout.puts JSON.generate({ jsonrpc: "2.0", id: id, error: { code: -32601, message: "Method not found: #{msg['method']}" } })
     end
