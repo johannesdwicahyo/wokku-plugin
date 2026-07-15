@@ -5,7 +5,7 @@
 # Manage your Wokku apps, databases, and deployments from Claude Code.
 #
 # Quick install:
-#   curl -fsSL https://raw.githubusercontent.com/johannesdwicahyo/wokku/main/mcp/server.rb -o wokku-mcp.rb
+#   curl -fsSL https://raw.githubusercontent.com/johannesdwicahyo/wokku-plugin/main/plugins/wokku/mcp/server.rb -o wokku-mcp.rb
 #   claude mcp add wokku \
 #     -e WOKKU_API_URL=https://wokku.cloud/api/v1 \
 #     -e WOKKU_API_TOKEN=your-token-here \
@@ -112,7 +112,9 @@ def build_tarball!(path, archive_path)
     ok = system("git", "-C", path, "archive", "--format=tar.gz", "--output=#{archive_path}", "HEAD")
     raise "git archive failed (is #{path} a git repo with at least one commit?)" unless ok
   else
-    ok = system("tar", "-czf", archive_path,
+    # COPYFILE_DISABLE stops macOS bsdtar from packing ._AppleDouble metadata
+    # files, which make nixpacks builds fail host-side (no-op on Linux).
+    ok = system({ "COPYFILE_DISABLE" => "1" }, "tar", "-czf", archive_path,
       "--exclude=.git", "--exclude=node_modules", "--exclude=tmp", "--exclude=log",
       "-C", path, ".")
     raise "tar failed while archiving #{path}" unless ok
@@ -362,7 +364,7 @@ TOOLS = [
   { name: "wokku_server_status", description: "Get server health (CPU, memory, disk)", inputSchema: { type: "object", properties: { server_id: { type: "string", description: "The server ID" } }, required: [ "server_id" ] } },
   { name: "wokku_list_apps", description: "List all applications", inputSchema: { type: "object", properties: {} } },
   { name: "wokku_get_app", description: "Get app details", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID or name" } }, required: [ "app_id" ] } },
-  { name: "wokku_create_app", description: "Create a new application", inputSchema: { type: "object", properties: { name: { type: "string", description: "App name" }, server_id: { type: "integer", description: "Server ID" }, deploy_branch: { type: "string", description: "Deploy branch (default: main)" } }, required: [ "name", "server_id" ] } },
+  { name: "wokku_create_app", description: "Create a new application", inputSchema: { type: "object", properties: { name: { type: "string", description: "App name" }, server_id: { type: "string", description: "Server ID (UUID)" }, deploy_branch: { type: "string", description: "Deploy branch (default: main)" } }, required: [ "name", "server_id" ] } },
   { name: "wokku_update_app", description: "Update app settings (rename, change branch)", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" }, name: { type: "string", description: "New name" }, deploy_branch: { type: "string", description: "New branch" } }, required: [ "app_id" ] } },
   { name: "wokku_delete_app", description: "Delete an application", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" } }, required: [ "app_id" ] } },
   { name: "wokku_restart_app", description: "Restart an application", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" } }, required: [ "app_id" ] } },
@@ -395,10 +397,10 @@ TOOLS = [
   { name: "wokku_remove_log_drain", description: "Remove a log drain", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" }, drain_id: { type: "string", description: "The drain ID" } }, required: [ "app_id", "drain_id" ] } },
   { name: "wokku_list_templates", description: "List all templates", inputSchema: { type: "object", properties: {} } },
   { name: "wokku_get_template", description: "Get template details", inputSchema: { type: "object", properties: { template_id: { type: "string", description: "Template ID or slug" } }, required: [ "template_id" ] } },
-  { name: "wokku_deploy_template", description: "Deploy a 1-click template", inputSchema: { type: "object", properties: { template_slug: { type: "string", description: "Template slug" }, server_id: { type: "integer", description: "Server ID" }, app_name: { type: "string", description: "App name" } }, required: [ "template_slug", "server_id" ] } },
+  { name: "wokku_deploy_template", description: "Deploy a 1-click template", inputSchema: { type: "object", properties: { template_slug: { type: "string", description: "Template slug" }, server_id: { type: "string", description: "Server ID (UUID)" }, app_name: { type: "string", description: "App name" } }, required: [ "template_slug", "server_id" ] } },
   { name: "wokku_list_databases", description: "List all databases", inputSchema: { type: "object", properties: {} } },
   { name: "wokku_get_database", description: "Get database details", inputSchema: { type: "object", properties: { database_id: { type: "string", description: "The database ID" } }, required: [ "database_id" ] } },
-  { name: "wokku_create_database", description: "Create a database", inputSchema: { type: "object", properties: { service_type: { type: "string", description: "Database type" }, name: { type: "string", description: "Name" }, server_id: { type: "integer", description: "Server ID" } }, required: [ "service_type", "name", "server_id" ] } },
+  { name: "wokku_create_database", description: "Create a database", inputSchema: { type: "object", properties: { service_type: { type: "string", description: "Database type" }, name: { type: "string", description: "Name" }, server_id: { type: "string", description: "Server ID (UUID)" } }, required: [ "service_type", "name", "server_id" ] } },
   { name: "wokku_delete_database", description: "Delete a database", inputSchema: { type: "object", properties: { database_id: { type: "string", description: "The database ID" } }, required: [ "database_id" ] } },
   { name: "wokku_link_database", description: "Link database to an app", inputSchema: { type: "object", properties: { database_id: { type: "string", description: "The database ID" }, app_id: { type: "string", description: "The app ID" } }, required: [ "database_id", "app_id" ] } },
   { name: "wokku_unlink_database", description: "Unlink database from an app", inputSchema: { type: "object", properties: { database_id: { type: "string", description: "The database ID" }, app_id: { type: "string", description: "The app ID" } }, required: [ "database_id", "app_id" ] } },
