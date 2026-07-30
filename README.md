@@ -47,9 +47,7 @@ Once installed, you can ask Claude things like:
 
 The May release of [Wokku](https://github.com/johannesdwicahyo/wokku)
 introduced shared-engine add-ons (Postgres / Redis / Memcached / RabbitMQ /
-Meilisearch — see the
-[dokku-shared-*](https://github.com/johannesdwicahyo?tab=repositories&q=dokku-shared)
-plugin family) plus a dedicated-upgrade flow. The plugin gained corresponding
+Meilisearch) plus a dedicated-upgrade flow. The plugin gained corresponding
 MCP tools:
 
 - `wokku_attach_shared_addon`, `wokku_detach_shared_addon`
