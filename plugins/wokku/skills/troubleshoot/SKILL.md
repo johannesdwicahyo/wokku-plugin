@@ -23,7 +23,7 @@ Diagnose issues with a Wokku app using a systematic checklist.
    - If latest deploy failed, use `wokku_get_deploy` for details
    - Common deploy failures:
      - Missing Procfile → suggest adding one
-     - Buildpack detection failed → suggest a Dockerfile or explicit buildpack
+     - Build detection failed → suggest adding a Dockerfile, or check the repo has a recognized project layout (Wokku auto-detects the build)
      - Out of memory during build → suggest upgrading dyno tier
 
 4. **Check logs**
@@ -43,7 +43,7 @@ Diagnose issues with a Wokku app using a systematic checklist.
    - Use `wokku_get_config` to see what's set
    - Compare against what the framework needs:
      - Rails: `RAILS_MASTER_KEY`, `DATABASE_URL`, `SECRET_KEY_BASE`
-     - Node: `NODE_ENV`, `PORT` (Dokku sets this automatically)
+     - Node: `NODE_ENV`, `PORT` (Wokku sets this automatically)
      - Django: `SECRET_KEY`, `DATABASE_URL`, `ALLOWED_HOSTS`
    - Suggest `wokku_set_config` to add missing ones
 

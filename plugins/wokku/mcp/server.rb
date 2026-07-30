@@ -322,9 +322,6 @@ def handle_tool(name, args)
   when "wokku_list_addons" then api_request(:get, "/apps/#{args['app_id']}/addons")
   when "wokku_add_addon" then api_request(:post, "/apps/#{args['app_id']}/addons", { service_type: args["service_type"], name: args["name"] })
   when "wokku_remove_addon" then api_request(:delete, "/apps/#{args['app_id']}/addons/#{args['addon_id']}")
-  when "wokku_list_log_drains" then api_request(:get, "/apps/#{args['app_id']}/log_drains")
-  when "wokku_add_log_drain" then api_request(:post, "/apps/#{args['app_id']}/log_drains", { url: args["url"] })
-  when "wokku_remove_log_drain" then api_request(:delete, "/apps/#{args['app_id']}/log_drains/#{args['drain_id']}")
   when "wokku_list_templates" then api_request(:get, "/templates")
   when "wokku_get_template" then api_request(:get, "/templates/#{args['template_id']}")
   when "wokku_deploy_template"
@@ -356,10 +353,10 @@ def handle_tool(name, args)
   end
 end
 
-# Tool definitions — 60 tools, 100% coverage of Wokku API v1
+# Tool definitions — 57 tools, 100% coverage of Wokku API v1
 TOOLS = [
   { name: "wokku_doctor", description: "Whole-chain self-diagnosis: auth, client version, host health, and app state in one call. Run this first when anything is failing or confusing, before digging into individual tools.", inputSchema: { type: "object", properties: {} } },
-  { name: "wokku_list_servers", description: "List all connected Dokku servers", inputSchema: { type: "object", properties: {} } },
+  { name: "wokku_list_servers", description: "List all connected servers", inputSchema: { type: "object", properties: {} } },
   { name: "wokku_get_server", description: "Get server details", inputSchema: { type: "object", properties: { server_id: { type: "string", description: "The server ID" } }, required: [ "server_id" ] } },
   { name: "wokku_server_status", description: "Get server health (CPU, memory, disk)", inputSchema: { type: "object", properties: { server_id: { type: "string", description: "The server ID" } }, required: [ "server_id" ] } },
   { name: "wokku_list_apps", description: "List all applications", inputSchema: { type: "object", properties: {} } },
@@ -392,9 +389,6 @@ TOOLS = [
   { name: "wokku_list_addons", description: "List linked databases", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" } }, required: [ "app_id" ] } },
   { name: "wokku_add_addon", description: "Add a database to an app", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" }, service_type: { type: "string", description: "Database type" }, name: { type: "string", description: "Optional name" } }, required: [ "app_id", "service_type" ] } },
   { name: "wokku_remove_addon", description: "Remove a database from an app", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" }, addon_id: { type: "string", description: "The addon ID" } }, required: [ "app_id", "addon_id" ] } },
-  { name: "wokku_list_log_drains", description: "List log drains", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" } }, required: [ "app_id" ] } },
-  { name: "wokku_add_log_drain", description: "Add a log drain", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" }, url: { type: "string", description: "Drain URL" } }, required: [ "app_id", "url" ] } },
-  { name: "wokku_remove_log_drain", description: "Remove a log drain", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" }, drain_id: { type: "string", description: "The drain ID" } }, required: [ "app_id", "drain_id" ] } },
   { name: "wokku_list_templates", description: "List all templates", inputSchema: { type: "object", properties: {} } },
   { name: "wokku_get_template", description: "Get template details", inputSchema: { type: "object", properties: { template_id: { type: "string", description: "Template ID or slug" } }, required: [ "template_id" ] } },
   { name: "wokku_deploy_template", description: "Deploy a 1-click template", inputSchema: { type: "object", properties: { template_slug: { type: "string", description: "Template slug" }, server_id: { type: "string", description: "Server ID (UUID)" }, app_name: { type: "string", description: "App name" } }, required: [ "template_slug", "server_id" ] } },

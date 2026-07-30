@@ -37,15 +37,22 @@ Guided workflow for deploying the current project to Wokku as a new app.
    - Use `wokku_create_database` then `wokku_link_database` to link it
    - Confirm that `DATABASE_URL` is now set automatically
 
-6. **Walk through git push deploy**
-   - Show the user the git remote command:
+6. **Deploy the code**
+   - Wokku apps deploy by `git push` to Wokku's central git host (`git.wokku.cloud`).
+     The exact remote URL for the app is on the app's dashboard page and in the
+     `wokku_get_app` payload — use that URL rather than guessing it.
+   - Show the user the git remote command (substitute the app's real remote URL):
      ```bash
-     git remote add dokku dokku@<server-host>:<app-name>
-     git push dokku main
+     git remote add wokku <app-git-remote-url>   # from wokku_get_app / dashboard
+     git push wokku main
      ```
-   - Get the server host from `wokku_get_server`
-   - Tell user to run this in their terminal
-   - After they push, use `wokku_get_logs` to show the deploy output
+   - Tell the user to run this in their terminal. On push, Wokku builds the code
+     and runs it on the platform (Docker Swarm via wokkud); routing and TLS are
+     handled automatically by Caddy — there is no server to SSH into.
+   - Alternatively, if the project has no git remote wired up, deploy the current
+     directory straight from disk with `wokku_deploy_tarball` (uploads a tarball,
+     builds, and reports the result — no `git push` needed).
+   - After the push (or tarball deploy), use `wokku_get_logs` to show the output.
 
 7. **Verify deployment**
    - Use `wokku_get_app` to check status
@@ -56,4 +63,4 @@ Guided workflow for deploying the current project to Wokku as a new app.
 
 - Free tier is 1 eco container + 1 mini database. If user hits the limit, suggest upgrading at wokku.cloud/dashboard/billing
 - For Rails apps, remind user to run `bin/rails credentials:edit` locally to set the master key
-- For Docker apps, the `Dockerfile` takes precedence over buildpack detection
+- For Docker apps, a `Dockerfile` takes precedence over Wokku's automatic build detection
