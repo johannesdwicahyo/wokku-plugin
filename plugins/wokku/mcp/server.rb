@@ -44,7 +44,7 @@ NO_TOKEN_HINT = "No Wokku token found. Run `wokku auth:login` (one browser hop; 
 # Sent as X-Wokku-Client-Version on every request so the API's client_version
 # concern can flag outdated MCP servers (see MIN_VERSIONS in
 # app/controllers/concerns/client_version.rb) and /doctor can surface it.
-SERVER_VERSION = "1.2.0"
+SERVER_VERSION = "1.4.1"
 
 # Log endpoint to stderr so Claude Code's MCP debug logs show which
 # Wokku instance (managed vs self-hosted OSS) the plugin is talking to.
@@ -286,7 +286,9 @@ def handle_tool(name, args)
   when "wokku_list_apps" then api_request(:get, "/apps")
   when "wokku_get_app" then api_request(:get, "/apps/#{args['app_id']}")
   when "wokku_create_app"
-    api_request(:post, "/apps", { name: args["name"], server_id: args["server_id"], deploy_branch: args["deploy_branch"] || "main" })
+    body = { name: args["name"], server_id: args["server_id"], deploy_branch: args["deploy_branch"] || "main" }
+    body[:box_size] = args["box_size"] if args["box_size"]
+    api_request(:post, "/apps", body)
   when "wokku_update_app"
     body = {}
     body[:name] = args["name"] if args["name"]
@@ -298,7 +300,7 @@ def handle_tool(name, args)
   when "wokku_start_app" then api_request(:post, "/apps/#{args['app_id']}/start")
   when "wokku_deploy_app" then api_request(:post, "/apps/#{args['app_id']}/deploy")
   when "wokku_get_config" then api_request(:get, "/apps/#{args['app_id']}/config")
-  when "wokku_set_config" then api_request(:put, "/apps/#{args['app_id']}/config", args["vars"])
+  when "wokku_set_config" then api_request(:put, "/apps/#{args['app_id']}/config", { vars: args["vars"] })
   when "wokku_unset_config" then api_request(:delete, "/apps/#{args['app_id']}/config", { keys: args["keys"] })
   when "wokku_list_domains" then api_request(:get, "/apps/#{args['app_id']}/domains")
   when "wokku_add_domain" then api_request(:post, "/apps/#{args['app_id']}/domains", { domain: args["domain"] })
@@ -361,7 +363,7 @@ TOOLS = [
   { name: "wokku_server_status", description: "Get server health (CPU, memory, disk)", inputSchema: { type: "object", properties: { server_id: { type: "string", description: "The server ID" } }, required: [ "server_id" ] } },
   { name: "wokku_list_apps", description: "List all applications", inputSchema: { type: "object", properties: {} } },
   { name: "wokku_get_app", description: "Get app details", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID or name" } }, required: [ "app_id" ] } },
-  { name: "wokku_create_app", description: "Create a new application", inputSchema: { type: "object", properties: { name: { type: "string", description: "App name" }, server_id: { type: "string", description: "Server ID (UUID)" }, deploy_branch: { type: "string", description: "Deploy branch (default: main)" } }, required: [ "name", "server_id" ] } },
+  { name: "wokku_create_app", description: "Create a new application", inputSchema: { type: "object", properties: { name: { type: "string", description: "App name" }, server_id: { type: "string", description: "Server ID (UUID)" }, deploy_branch: { type: "string", description: "Deploy branch (default: main)" }, box_size: { type: "string", enum: %w[sleeping small medium large xlarge], description: "Box size (default: sleeping). Sleeping apps idle-sleep and count toward the plan's sleeping-box cap; use small or larger for an always-on app (bots, workers)." } }, required: [ "name", "server_id" ] } },
   { name: "wokku_update_app", description: "Update app settings (rename, change branch)", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" }, name: { type: "string", description: "New name" }, deploy_branch: { type: "string", description: "New branch" } }, required: [ "app_id" ] } },
   { name: "wokku_delete_app", description: "Delete an application", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" } }, required: [ "app_id" ] } },
   { name: "wokku_restart_app", description: "Restart an application", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" } }, required: [ "app_id" ] } },

@@ -21,6 +21,8 @@ Guided workflow for deploying the current project to Wokku as a new app.
    - Ask user for an app name (default: current directory name, lowercase with hyphens)
    - Validate: lowercase, alphanumeric + hyphens, 3-30 chars
    - Call `wokku_create_app` with the chosen name, server_id, and deploy_branch (default: "main")
+   - Pass `box_size`: `sleeping` (default) idles when unused and counts toward the plan's sleeping-box cap; use `small` or larger for anything always-on (bots, workers, schedulers)
+   - Background-only apps (no HTTP): after the first deploy, `wokku_scale_app` with `web: 0, worker: 1`
    - Confirm creation and show the app ID
 
 4. **Set environment variables** (optional)
