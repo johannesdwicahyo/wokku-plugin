@@ -44,7 +44,7 @@ NO_TOKEN_HINT = "No Wokku token found. Run `wokku auth:login` (one browser hop; 
 # Sent as X-Wokku-Client-Version on every request so the API's client_version
 # concern can flag outdated MCP servers (see MIN_VERSIONS in
 # app/controllers/concerns/client_version.rb) and /doctor can surface it.
-SERVER_VERSION = "1.4.1"
+SERVER_VERSION = "1.4.2"
 
 # Log endpoint to stderr so Claude Code's MCP debug logs show which
 # Wokku instance (managed vs self-hosted OSS) the plugin is talking to.
@@ -322,7 +322,9 @@ def handle_tool(name, args)
   when "wokku_get_deploy" then api_request(:get, "/apps/#{args['app_id']}/deploys/#{args['deploy_id']}")
   when "wokku_deploy_tarball" then deploy_tarball(args)
   when "wokku_list_addons" then api_request(:get, "/apps/#{args['app_id']}/addons")
-  when "wokku_add_addon" then api_request(:post, "/apps/#{args['app_id']}/addons", { service_type: args["service_type"], name: args["name"] })
+  when "wokku_enable_shared_addon" then api_request(:post, "/apps/#{args['app_id']}/addons/shared", { engine: args["engine"] })
+  when "wokku_disable_shared_addon" then api_request(:delete, "/apps/#{args['app_id']}/addons/shared/#{args['engine']}")
+  when "wokku_upgrade_dedicated_addon" then api_request(:post, "/apps/#{args['app_id']}/addons/dedicated", { engine: args["engine"] })
   when "wokku_remove_addon" then api_request(:delete, "/apps/#{args['app_id']}/addons/#{args['addon_id']}")
   when "wokku_list_templates" then api_request(:get, "/templates")
   when "wokku_get_template" then api_request(:get, "/templates/#{args['template_id']}")
@@ -355,7 +357,7 @@ def handle_tool(name, args)
   end
 end
 
-# Tool definitions — 57 tools, 100% coverage of Wokku API v1
+# Tool definitions — 59 tools, 100% coverage of Wokku API v1
 TOOLS = [
   { name: "wokku_doctor", description: "Whole-chain self-diagnosis: auth, client version, host health, and app state in one call. Run this first when anything is failing or confusing, before digging into individual tools.", inputSchema: { type: "object", properties: {} } },
   { name: "wokku_list_servers", description: "List all connected servers", inputSchema: { type: "object", properties: {} } },
@@ -389,7 +391,9 @@ TOOLS = [
   { name: "wokku_get_deploy", description: "Get deploy details", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" }, deploy_id: { type: "string", description: "The deploy ID" } }, required: [ "app_id", "deploy_id" ] } },
   { name: "wokku_deploy_tarball", description: "Deploy an app from a local directory without a git remote: tars `path` (git archive when it's a git repo, else tar excluding .git/node_modules/tmp/log), uploads it, creates the deploy, and polls until it finishes. Returns the final status and a log tail.", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID or name" }, path: { type: "string", description: "Local directory to deploy" } }, required: [ "app_id", "path" ] } },
   { name: "wokku_list_addons", description: "List linked databases", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" } }, required: [ "app_id" ] } },
-  { name: "wokku_add_addon", description: "Add a database to an app", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" }, service_type: { type: "string", description: "Database type" }, name: { type: "string", description: "Optional name" } }, required: [ "app_id", "service_type" ] } },
+  { name: "wokku_enable_shared_addon", description: "Attach a FREE shared add-on to an app (a tenant on the host's shared engine; provisions async, sets DATABASE_URL / MARIADB_URL / REDIS_URL). Default choice for a new app database. Shared postgres/mariadb are backed up on request only; shared redis is never backed up.", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID or name" }, engine: { type: "string", enum: %w[postgres mariadb redis], description: "Shared engine" } }, required: [ "app_id", "engine" ] } },
+  { name: "wokku_disable_shared_addon", description: "Detach a shared add-on from an app and DESTROY its tenant data (postgres/mariadb take a farewell snapshot first). Confirm with the user before calling.", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID or name" }, engine: { type: "string", enum: %w[postgres mariadb redis], description: "Shared engine" } }, required: [ "app_id", "engine" ] } },
+  { name: "wokku_upgrade_dedicated_addon", description: "Upgrade an app's existing shared postgres or redis to a dedicated container with nightly backups (uses one of the plan's dedicated slots; data is migrated and the app's URL repointed). Shared MariaDB has no migration path; for a dedicated MariaDB/MongoDB use wokku_create_database + wokku_link_database (starts empty).", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID or name" }, engine: { type: "string", enum: %w[postgres redis], description: "Engine of the shared add-on to upgrade" } }, required: [ "app_id", "engine" ] } },
   { name: "wokku_remove_addon", description: "Remove a database from an app", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" }, addon_id: { type: "string", description: "The addon ID" } }, required: [ "app_id", "addon_id" ] } },
   { name: "wokku_list_templates", description: "List all templates", inputSchema: { type: "object", properties: {} } },
   { name: "wokku_get_template", description: "Get template details", inputSchema: { type: "object", properties: { template_id: { type: "string", description: "Template ID or slug" } }, required: [ "template_id" ] } },
