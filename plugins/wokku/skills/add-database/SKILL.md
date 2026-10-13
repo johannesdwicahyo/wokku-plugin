@@ -20,9 +20,9 @@ Create a new database and link it to an app so the connection URL is available a
      Size-capped by plan; postgres/mariadb backed up on request only, redis never backed up.
    - **Dedicated** — own container, nightly backups, uses one of the plan's dedicated slots.
      Engines: `postgres`, `mariadb`, `mongodb`, `redis`.
-     - App already has shared postgres/redis → `wokku_upgrade_dedicated_addon` (migrates data, repoints the URL).
+     - App already has a shared postgres/mariadb/redis → `wokku_upgrade_dedicated_addon` (migrates data, repoints the URL).
      - Otherwise → `wokku_create_database` (`service_type`, `name` default `{app}-{type}`, `server_id`),
-       then `wokku_link_database`. It starts EMPTY — shared MariaDB data is not migrated.
+       then `wokku_link_database`. It starts EMPTY.
 
 3. **Verify**
    - Use `wokku_get_config` to confirm the connection URL is set

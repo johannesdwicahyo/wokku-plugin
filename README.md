@@ -47,10 +47,10 @@ Once installed, you can ask Claude things like:
 
 The May release of [Wokku](https://github.com/johannesdwicahyo/wokku)
 introduced shared-engine add-ons (today: Postgres / MariaDB / Redis) plus a
-dedicated-upgrade flow. The plugin's MCP tools (current names, v1.4.2):
+dedicated-upgrade flow. The plugin's MCP tools (current names, v1.4.3):
 
 - `wokku_enable_shared_addon`, `wokku_disable_shared_addon`
-- `wokku_upgrade_dedicated_addon` (Postgres / Redis)
+- `wokku_upgrade_dedicated_addon` (Postgres / MariaDB / Redis)
 - `wokku_list_addons` now distinguishes shared vs dedicated and shows
   per-tenant usage (size, connection count)
 
