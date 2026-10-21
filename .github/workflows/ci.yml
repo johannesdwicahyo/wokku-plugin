@@ -1,0 +1,17 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  openapi-coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: 3.4.3
+      - run: ruby script/openapi_coverage.rb --self-test
+      - run: ruby script/openapi_coverage.rb https://wokku.cloud/api/v1/openapi.yaml "plugins/wokku/mcp/*.rb"
