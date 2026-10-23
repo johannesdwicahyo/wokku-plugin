@@ -44,7 +44,7 @@ NO_TOKEN_HINT = "No Wokku token found. Run `wokku auth:login` (one browser hop; 
 # Sent as X-Wokku-Client-Version on every request so the API's client_version
 # concern can flag outdated MCP servers (see MIN_VERSIONS in
 # app/controllers/concerns/client_version.rb) and /doctor can surface it.
-SERVER_VERSION = "1.5.0"
+SERVER_VERSION = "1.6.0"
 
 # Log endpoint to stderr so Claude Code's MCP debug logs show which
 # Wokku instance (managed vs self-hosted OSS) the plugin is talking to.
@@ -403,6 +403,14 @@ def handle_tool(name, args)
   when "wokku_list_team_members" then api_request(:get, "/teams/#{args['team_id']}/members")
   when "wokku_add_team_member" then api_request(:post, "/teams/#{args['team_id']}/members", { email: args["email"], role: args["role"] || "member" })
   when "wokku_remove_team_member" then api_request(:delete, "/teams/#{args['team_id']}/members/#{args['member_id']}")
+  when "wokku_list_incidents"
+    query = { state: args["state"] || "open" }
+    query[:app_id] = args["app_id"] if args["app_id"]
+    api_request(:get, "/incidents?#{URI.encode_www_form(query)}")
+  when "wokku_get_incident" then api_request(:get, "/incidents/#{args['incident_id']}")
+  when "wokku_list_alert_mutes" then api_request(:get, "/alert_mutes")
+  when "wokku_mute_alerts" then api_request(:post, "/alert_mutes", args.slice("app_id", "event", "until"))
+  when "wokku_unmute_alerts" then api_request(:delete, "/alert_mutes/#{args['mute_id']}")
   when "wokku_list_notifications" then api_request(:get, "/notifications")
   when "wokku_create_notification"
     api_request(:post, "/notifications", { channel: args["channel"], event: args["event"], config: args["config"] })
@@ -515,6 +523,11 @@ TOOLS = [
   { name: "wokku_list_team_members", description: "List team members", inputSchema: { type: "object", properties: { team_id: { type: "string", description: "The team ID" } }, required: [ "team_id" ] } },
   { name: "wokku_add_team_member", description: "Invite a team member", inputSchema: { type: "object", properties: { team_id: { type: "string", description: "The team ID" }, email: { type: "string", description: "Email" }, role: { type: "string", description: "Role: viewer, member, admin" } }, required: [ "team_id", "email" ] } },
   { name: "wokku_remove_team_member", description: "Remove a team member", inputSchema: { type: "object", properties: { team_id: { type: "string", description: "The team ID" }, member_id: { type: "string", description: "The member ID" } }, required: [ "team_id", "member_id" ] } },
+  { name: "wokku_list_incidents", description: "List outages (incidents) of the user's apps: open ones by default, or all recent ones. Use this first when asked 'is anything down?'.", inputSchema: { type: "object", properties: { state: { type: "string", enum: %w[open all], description: "open (default) or all" }, app_id: { type: "string", description: "Optional app ID or name" } } } },
+  { name: "wokku_get_incident", description: "Get one incident: reason, start, end and duration.", inputSchema: { type: "object", properties: { incident_id: { type: "string", description: "The incident ID" } }, required: [ "incident_id" ] } },
+  { name: "wokku_list_alert_mutes", description: "List the user's active push-alert mutes (phone notifications only).", inputSchema: { type: "object", properties: {} } },
+  { name: "wokku_mute_alerts", description: "Mute push alerts on the user's phone for an app and/or an event type, optionally until a time. Give app_id or event (or both); email/Slack alerts are unaffected.", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "App ID or name" }, event: { type: "string", enum: %w[deploy_succeeded deploy_failed app_crashed backup_completed backup_failed resource_high_cpu resource_high_memory app_down app_recovered], description: "Event type" }, until: { type: "string", description: "Optional ISO 8601 end time" } } } },
+  { name: "wokku_unmute_alerts", description: "Remove a push-alert mute.", inputSchema: { type: "object", properties: { mute_id: { type: "string", description: "The mute ID (see wokku_list_alert_mutes)" } }, required: [ "mute_id" ] } },
   { name: "wokku_list_notifications", description: "List notification channels", inputSchema: { type: "object", properties: {} } },
   { name: "wokku_create_notification", description: "Create a notification channel", inputSchema: { type: "object", properties: { channel: { type: "string", description: "Channel type" }, event: { type: "string", description: "Event type" }, config: { type: "object", description: "Channel config" } }, required: [ "channel", "event", "config" ] } },
   { name: "wokku_delete_notification", description: "Delete a notification channel", inputSchema: { type: "object", properties: { notification_id: { type: "string", description: "The notification ID" } }, required: [ "notification_id" ] } },
