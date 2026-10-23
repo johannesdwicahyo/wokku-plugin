@@ -44,7 +44,7 @@ NO_TOKEN_HINT = "No Wokku token found. Run `wokku auth:login` (one browser hop; 
 # Sent as X-Wokku-Client-Version on every request so the API's client_version
 # concern can flag outdated MCP servers (see MIN_VERSIONS in
 # app/controllers/concerns/client_version.rb) and /doctor can surface it.
-SERVER_VERSION = "1.4.3"
+SERVER_VERSION = "1.5.0"
 
 # Log endpoint to stderr so Claude Code's MCP debug logs show which
 # Wokku instance (managed vs self-hosted OSS) the plugin is talking to.
@@ -352,12 +352,37 @@ def handle_tool(name, args)
     api_request(:post, "/notifications", { channel: args["channel"], event: args["event"], config: args["config"] })
   when "wokku_delete_notification" then api_request(:delete, "/notifications/#{args['notification_id']}")
   when "wokku_list_activities" then api_request(:get, "/activities?limit=#{args['limit'] || 20}")
+  when "wokku_rename_app" then api_request(:patch, "/apps/#{args['app_id']}/rename", { name: args["new_name"] })
+  when "wokku_clone_app"
+    api_request(:post, "/apps/#{args['app_id']}/clone", { name: args["new_name"], skip_deploy: args.fetch("skip_deploy", true) })
+  when "wokku_transfer_app" then api_request(:post, "/apps/#{args['app_id']}/transfer", { recipient_email: args["recipient_email"] })
+  when "wokku_lock_app" then api_request(:post, "/apps/#{args['app_id']}/lock")
+  when "wokku_unlock_app" then api_request(:post, "/apps/#{args['app_id']}/unlock")
+  when "wokku_set_https" then api_request(:patch, "/apps/#{args['app_id']}/https", { enabled: args["enabled"] })
+  when "wokku_set_cdn" then api_request(:patch, "/apps/#{args['app_id']}/cdn", { enabled: args["enabled"] })
+  when "wokku_set_maintenance" then api_request(:patch, "/apps/#{args['app_id']}/maintenance", { enabled: args["enabled"] })
+  when "wokku_github_connect"
+    api_request(:post, "/apps/#{args['app_id']}/github_connect", { repo: args["repo"], branch: args["branch"] || "main" })
+  when "wokku_github_disconnect" then api_request(:delete, "/apps/#{args['app_id']}/github_disconnect")
+  when "wokku_list_previews" then api_request(:get, "/apps/#{args['app_id']}/previews")
+  when "wokku_destroy_preview" then api_request(:delete, "/apps/#{args['app_id']}/previews/#{args['pr_number']}")
+  when "wokku_list_scheduled_tasks" then api_request(:get, "/apps/#{args['app_id']}/scheduled_tasks")
+  when "wokku_create_scheduled_task"
+    body = { command: args["command"], schedule: args["schedule"] }
+    body[:description] = args["description"] if args.key?("description")
+    api_request(:post, "/apps/#{args['app_id']}/scheduled_tasks", body)
+  when "wokku_delete_scheduled_task" then api_request(:delete, "/apps/#{args['app_id']}/scheduled_tasks/#{args['task_id']}")
+  when "wokku_get_app_metrics" then api_request(:get, "/apps/#{args['app_id']}/metrics")
+  when "wokku_get_app_monitor" then api_request(:get, "/apps/#{args['app_id']}/monitor")
+  when "wokku_get_app_vitals" then api_request(:get, "/apps/#{args['app_id']}/vitals")
+  when "wokku_get_database_monitor" then api_request(:get, "/databases/#{args['database_id']}/monitor")
+  when "wokku_get_current_plan" then api_request(:get, "/billing/current_plan")
   else
     { error: "Unknown tool: #{name}" }
   end
 end
 
-# Tool definitions — 59 tools, 100% coverage of Wokku API v1
+# Tool definitions — 79 tools, 100% coverage of Wokku API v1
 TOOLS = [
   { name: "wokku_doctor", description: "Whole-chain self-diagnosis: auth, client version, host health, and app state in one call. Run this first when anything is failing or confusing, before digging into individual tools.", inputSchema: { type: "object", properties: {} } },
   { name: "wokku_list_servers", description: "List all connected servers", inputSchema: { type: "object", properties: {} } },
@@ -417,7 +442,27 @@ TOOLS = [
   { name: "wokku_list_notifications", description: "List notification channels", inputSchema: { type: "object", properties: {} } },
   { name: "wokku_create_notification", description: "Create a notification channel", inputSchema: { type: "object", properties: { channel: { type: "string", description: "Channel type" }, event: { type: "string", description: "Event type" }, config: { type: "object", description: "Channel config" } }, required: [ "channel", "event", "config" ] } },
   { name: "wokku_delete_notification", description: "Delete a notification channel", inputSchema: { type: "object", properties: { notification_id: { type: "string", description: "The notification ID" } }, required: [ "notification_id" ] } },
-  { name: "wokku_list_activities", description: "List recent activity log", inputSchema: { type: "object", properties: { limit: { type: "integer", description: "Number of entries (default: 20)" } } } }
+  { name: "wokku_list_activities", description: "List recent activity log", inputSchema: { type: "object", properties: { limit: { type: "integer", description: "Number of entries (default: 20)" } } } },
+  { name: "wokku_rename_app", description: "Rename an app. Custom domains are kept, but the app's auto-generated wokku.app subdomain changes, breaking bookmarks to it.", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID or name" }, new_name: { type: "string", description: "New app name (lowercase, 2-50 chars, letters, digits, hyphens)" } }, required: [ "app_id", "new_name" ] } },
+  { name: "wokku_clone_app", description: "Clone an app's settings into a new app on the same server. Does NOT copy env vars or databases.", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "Source app ID or name" }, new_name: { type: "string", description: "New app name" }, skip_deploy: { type: "boolean", description: "Skip the initial deploy (default: true)" } }, required: [ "app_id", "new_name" ] } },
+  { name: "wokku_transfer_app", description: "Start transferring an app to another Wokku user by email. Moves ownership once they accept the emailed link — confirm with the user first.", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID or name" }, recipient_email: { type: "string", description: "Recipient's existing Wokku account email" } }, required: [ "app_id", "recipient_email" ] } },
+  { name: "wokku_lock_app", description: "Lock an app: git push and API deploys are refused until unlocked.", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID or name" } }, required: [ "app_id" ] } },
+  { name: "wokku_unlock_app", description: "Unlock an app so deploys are accepted again.", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID or name" } }, required: [ "app_id" ] } },
+  { name: "wokku_set_https", description: "Enable or disable the HTTP→HTTPS redirect for an app.", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID or name" }, enabled: { type: "boolean", description: "true to enable, false to disable" } }, required: [ "app_id", "enabled" ] } },
+  { name: "wokku_set_cdn", description: "Enable or disable the Cloudflare CDN proxy on an app's DNS record. DNS propagation may take a minute.", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID or name" }, enabled: { type: "boolean", description: "true to enable, false to disable" } }, required: [ "app_id", "enabled" ] } },
+  { name: "wokku_set_maintenance", description: "Enable or disable maintenance mode (visitors get a 503 page instead of the app).", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID or name" }, enabled: { type: "boolean", description: "true to enable, false to disable" } }, required: [ "app_id", "enabled" ] } },
+  { name: "wokku_github_connect", description: "Connect a GitHub repository to an app for auto-deploy on push.", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID or name" }, repo: { type: "string", description: "owner/repo" }, branch: { type: "string", description: "Branch to track (default: main)" } }, required: [ "app_id", "repo" ] } },
+  { name: "wokku_github_disconnect", description: "Disconnect the GitHub repository from an app.", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID or name" } }, required: [ "app_id" ] } },
+  { name: "wokku_list_previews", description: "List PR preview apps for a parent app.", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The parent app ID or name" } }, required: [ "app_id" ] } },
+  { name: "wokku_destroy_preview", description: "Queue destruction of a PR preview app by PR number (async).", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The parent app ID or name" }, pr_number: { type: "integer", description: "PR number" } }, required: [ "app_id", "pr_number" ] } },
+  { name: "wokku_list_scheduled_tasks", description: "List scheduled tasks (cron entries) for an app.", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID or name" } }, required: [ "app_id" ] } },
+  { name: "wokku_create_scheduled_task", description: "Add a scheduled task (cron entry) to an app. May return a plan-limit error with an upgrade hint.", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID or name" }, command: { type: "string", description: "Command to run" }, schedule: { type: "string", description: "Cron expression, e.g. '*/5 * * * *'" }, description: { type: "string", description: "Optional description" } }, required: [ "app_id", "command", "schedule" ] } },
+  { name: "wokku_delete_scheduled_task", description: "Delete a scheduled task.", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID or name" }, task_id: { type: "string", description: "The scheduled task ID" } }, required: [ "app_id", "task_id" ] } },
+  { name: "wokku_get_app_metrics", description: "Get an app's CPU + memory metrics (last 60 minutes + last 24 hourly buckets). Read-only.", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID or name" } }, required: [ "app_id" ] } },
+  { name: "wokku_get_app_monitor", description: "Get HTTP request stats for an app (last 24h: totals, 5-min buckets, slowest URLs). Read-only.", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID or name" } }, required: [ "app_id" ] } },
+  { name: "wokku_get_app_vitals", description: "Get Core Web Vitals (CLS/LCP/INP/FCP/TTFB) p50/p75/p95 for an app over the last 7 days. Read-only.", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID or name" } }, required: [ "app_id" ] } },
+  { name: "wokku_get_database_monitor", description: "Get the latest database stats snapshot (connections, cache hit ratio, size, top queries). Read-only.", inputSchema: { type: "object", properties: { database_id: { type: "string", description: "The database ID or name" } }, required: [ "database_id" ] } },
+  { name: "wokku_get_current_plan", description: "Get the current Wokku plan and its limits.", inputSchema: { type: "object", properties: {} } }
 ].freeze
 
 # Turns a tool result into the text shown to Claude. Plain {error: "msg"}

@@ -35,7 +35,8 @@ class FakeApi
       k, v = h.split(":", 2)
       headers[k.strip.downcase] = v.to_s.strip
     end
-    body = headers["content-length"] ? sock.read(headers["content-length"].to_i) : nil
+    content_length = headers["content-length"]&.to_i
+    body = (content_length && content_length > 0) ? sock.read(content_length) : nil
     path = target.split("?").first
     @requests << { method: verb, path: target, body: body, headers: headers }
     status, payload = @responses.fetch("#{verb} #{path}", [ 200, {} ])
