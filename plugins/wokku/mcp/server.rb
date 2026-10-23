@@ -131,14 +131,16 @@ def run_command(args)
   return started if error_result?(started) || !started.is_a?(Hash)
 
   run_id = started["run_id"]
+  return started unless run_id
+
   result = nil
   RUN_POLL_MAX_ATTEMPTS.times do |i|
     result = api_request(:get, "/apps/#{args['app_id']}/runs/#{run_id}")
-    return result if error_result?(result) || TERMINAL_RUN_STATUSES.include?(result["status"].to_s)
+    return result if error_result?(result) || !result.is_a?(Hash) || TERMINAL_RUN_STATUSES.include?(result["status"].to_s)
 
     sleep RUN_POLL_INTERVAL if i < RUN_POLL_MAX_ATTEMPTS - 1
   end
-  { run_id: run_id, status: result&.dig("status"), note: "Still running after ~10 minutes. Check later with wokku_get_run." }
+  { run_id: run_id, status: result.is_a?(Hash) ? result["status"] : nil, note: "Still running after ~10 minutes. Check later with wokku_get_run." }
 end
 
 # wokku_deploy_tarball — Track A Phase 4a Task 6. Deploys a local directory
@@ -444,10 +446,10 @@ def handle_tool(name, args)
   when "wokku_list_box_sizes" then api_request(:get, "/dyno_tiers")
   when "wokku_get_dynos" then api_request(:get, "/apps/#{args['app_id']}/dynos")
   when "wokku_resize_app"
-    body = {}
-    body[:dyno_tier_name] = args["box_size"] if args["box_size"]
-    body[:count] = args["count"] if args["count"]
-    api_request(:patch, "/apps/#{args['app_id']}/dynos/#{args['dyno_id']}", body)
+    shape = {}
+    shape[:cpu] = args["cpu"] if args["cpu"]
+    shape[:memory_mb] = args["memory_mb"] if args["memory_mb"]
+    api_request(:patch, "/apps/#{args['app_id']}/ps", { resources: { args["process_type"] => shape } })
   when "wokku_import_database" then api_upload(:post, "/databases/#{args['database_id']}/import", args["file_path"])
   when "wokku_get_backup_download_url" then api_request(:get, "/databases/#{args['database_id']}/backups/#{args['backup_id']}/download")
   when "wokku_restore_backup" then api_request(:post, "/databases/#{args['database_id']}/backups/#{args['backup_id']}/restore")
@@ -466,7 +468,7 @@ TOOLS = [
   { name: "wokku_get_app", description: "Get app details", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID or name" } }, required: [ "app_id" ] } },
   { name: "wokku_create_app", description: "Create a new application", inputSchema: { type: "object", properties: { name: { type: "string", description: "App name" }, server_id: { type: "string", description: "Server ID (UUID)" }, deploy_branch: { type: "string", description: "Deploy branch (default: main)" }, box_size: { type: "string", enum: %w[sleeping small medium large xlarge], description: "Box size (default: sleeping). Sleeping apps idle-sleep and count toward the plan's sleeping-box cap; use small or larger for an always-on app (bots, workers)." } }, required: [ "name", "server_id" ] } },
   { name: "wokku_update_app", description: "Update app settings (rename, change branch)", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" }, name: { type: "string", description: "New name" }, deploy_branch: { type: "string", description: "New branch" } }, required: [ "app_id" ] } },
-  { name: "wokku_delete_app", description: "Delete an application", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" } }, required: [ "app_id" ] } },
+  { name: "wokku_delete_app", description: "Delete an application. Permanent — confirm with the user first.", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" } }, required: [ "app_id" ] } },
   { name: "wokku_restart_app", description: "Restart an application", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" } }, required: [ "app_id" ] } },
   { name: "wokku_stop_app", description: "Stop an application", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" } }, required: [ "app_id" ] } },
   { name: "wokku_start_app", description: "Start a stopped application", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" } }, required: [ "app_id" ] } },
@@ -493,14 +495,14 @@ TOOLS = [
   { name: "wokku_enable_shared_addon", description: "Attach a FREE shared add-on to an app (a tenant on the host's shared engine; provisions async, sets DATABASE_URL / MARIADB_URL / REDIS_URL). Default choice for a new app database. Shared postgres/mariadb are backed up on request only; shared redis is never backed up.", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID or name" }, engine: { type: "string", enum: %w[postgres mariadb redis], description: "Shared engine" } }, required: [ "app_id", "engine" ] } },
   { name: "wokku_disable_shared_addon", description: "Detach a shared add-on from an app and DESTROY its tenant data (postgres/mariadb take a farewell snapshot first). Confirm with the user before calling.", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID or name" }, engine: { type: "string", enum: %w[postgres mariadb redis], description: "Shared engine" } }, required: [ "app_id", "engine" ] } },
   { name: "wokku_upgrade_dedicated_addon", description: "Upgrade an app's existing shared postgres, mariadb or redis to a dedicated container with nightly backups (uses one of the plan's dedicated slots; data is migrated and the app's URL repointed). For a dedicated MongoDB use wokku_create_database + wokku_link_database (starts empty).", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID or name" }, engine: { type: "string", enum: %w[postgres mariadb redis], description: "Engine of the shared add-on to upgrade" } }, required: [ "app_id", "engine" ] } },
-  { name: "wokku_remove_addon", description: "Remove a database from an app", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" }, addon_id: { type: "string", description: "The addon ID" } }, required: [ "app_id", "addon_id" ] } },
+  { name: "wokku_remove_addon", description: "Remove a dedicated add-on from an app. DESTROYS the database (a farewell snapshot is taken) — confirm with the user first.", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" }, addon_id: { type: "string", description: "The addon ID" } }, required: [ "app_id", "addon_id" ] } },
   { name: "wokku_list_templates", description: "List all templates", inputSchema: { type: "object", properties: {} } },
   { name: "wokku_get_template", description: "Get template details", inputSchema: { type: "object", properties: { template_id: { type: "string", description: "Template ID or slug" } }, required: [ "template_id" ] } },
   { name: "wokku_deploy_template", description: "Deploy a 1-click template", inputSchema: { type: "object", properties: { template_slug: { type: "string", description: "Template slug" }, server_id: { type: "string", description: "Server ID (UUID)" }, app_name: { type: "string", description: "App name" } }, required: [ "template_slug", "server_id" ] } },
   { name: "wokku_list_databases", description: "List all databases", inputSchema: { type: "object", properties: {} } },
   { name: "wokku_get_database", description: "Get database details", inputSchema: { type: "object", properties: { database_id: { type: "string", description: "The database ID" } }, required: [ "database_id" ] } },
   { name: "wokku_create_database", description: "Create a database", inputSchema: { type: "object", properties: { service_type: { type: "string", description: "Database type" }, name: { type: "string", description: "Name" }, server_id: { type: "string", description: "Server ID (UUID)" } }, required: [ "service_type", "name", "server_id" ] } },
-  { name: "wokku_delete_database", description: "Delete a database", inputSchema: { type: "object", properties: { database_id: { type: "string", description: "The database ID" } }, required: [ "database_id" ] } },
+  { name: "wokku_delete_database", description: "Delete a database. DESTROYS the database and its data — confirm with the user first.", inputSchema: { type: "object", properties: { database_id: { type: "string", description: "The database ID" } }, required: [ "database_id" ] } },
   { name: "wokku_link_database", description: "Link database to an app", inputSchema: { type: "object", properties: { database_id: { type: "string", description: "The database ID" }, app_id: { type: "string", description: "The app ID" } }, required: [ "database_id", "app_id" ] } },
   { name: "wokku_unlink_database", description: "Unlink database from an app", inputSchema: { type: "object", properties: { database_id: { type: "string", description: "The database ID" }, app_id: { type: "string", description: "The app ID" } }, required: [ "database_id", "app_id" ] } },
   { name: "wokku_list_backups", description: "List backups", inputSchema: { type: "object", properties: { database_id: { type: "string", description: "The database ID" } }, required: [ "database_id" ] } },
@@ -540,13 +542,13 @@ TOOLS = [
   { name: "wokku_whoami", description: "Show the signed-in Wokku user.", inputSchema: { type: "object", properties: {} } },
   { name: "wokku_list_api_tokens", description: "List the user's API tokens (values are never shown again).", inputSchema: { type: "object", properties: {} } },
   { name: "wokku_create_api_token", description: "Create an API token. The token value is returned once — show it to the user.", inputSchema: { type: "object", properties: { name: { type: "string", description: "Token name" }, expires_at: { type: "string", description: "Optional ISO 8601 expiry" } }, required: [ "name" ] } },
-  { name: "wokku_revoke_api_token", description: "Revoke an API token. Anything using it stops working immediately.", inputSchema: { type: "object", properties: { token_id: { type: "string", description: "The token ID" } }, required: [ "token_id" ] } },
+  { name: "wokku_revoke_api_token", description: "Revoke an API token. Anything using it (possibly this plugin) stops working immediately — confirm with the user first.", inputSchema: { type: "object", properties: { token_id: { type: "string", description: "The token ID" } }, required: [ "token_id" ] } },
   { name: "wokku_ai_diagnose", description: "Ask Wokku's AI to diagnose a failed deploy from its build log.", inputSchema: { type: "object", properties: { deploy_id: { type: "string", description: "The deploy ID (see wokku_list_deploys)" } }, required: [ "deploy_id" ] } },
   { name: "wokku_run_command", description: "Run a one-off command in a fresh container for the app and wait for its output and exit code (up to ~10 minutes).", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID or name" }, command: { type: "string", description: "Command, e.g. 'bin/rails db:migrate'" } }, required: [ "app_id", "command" ] } },
   { name: "wokku_get_run", description: "Get the status/output of a one-off run started by wokku_run_command.", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID or name" }, run_id: { type: "string", description: "The run ID" } }, required: [ "app_id", "run_id" ] } },
   { name: "wokku_list_box_sizes", description: "List available box sizes (CPU/memory tiers) and prices.", inputSchema: { type: "object", properties: {} } },
   { name: "wokku_get_dynos", description: "List an app's process allocations (process type, count, box size, monthly cost).", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID or name" } }, required: [ "app_id" ] } },
-  { name: "wokku_resize_app", description: "Change an allocation's box size and/or count. Changes cost — confirm with the user. Get dyno_id from wokku_get_dynos.", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID or name" }, dyno_id: { type: "string", description: "Allocation ID from wokku_get_dynos" }, box_size: { type: "string", description: "Box size name from wokku_list_box_sizes" }, count: { type: "integer", description: "Process count (>= 1)" } }, required: [ "app_id", "dyno_id" ] } },
+  { name: "wokku_resize_app", description: "Change a process type's CPU/memory shape (per-resource pricing). Changes cost — confirm with the user. See wokku_get_dynos for current shapes.", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID or name" }, process_type: { type: "string", description: "Process type, e.g. web" }, cpu: { type: "number", description: "CPU (vCPU, e.g. 0.5)" }, memory_mb: { type: "integer", description: "Memory in MB" } }, required: [ "app_id", "process_type" ] } },
   { name: "wokku_import_database", description: "Import a dump file (e.g. pg_dump -Fc) into a database. OVERWRITES live data — confirm with the user first.", inputSchema: { type: "object", properties: { database_id: { type: "string", description: "The database ID or name" }, file_path: { type: "string", description: "Absolute path to the local dump file" } }, required: [ "database_id", "file_path" ] } },
   { name: "wokku_get_backup_download_url", description: "Get a short-lived download URL for a database backup.", inputSchema: { type: "object", properties: { database_id: { type: "string", description: "The database ID or name" }, backup_id: { type: "string", description: "The backup ID (see wokku_list_backups)" } }, required: [ "database_id", "backup_id" ] } },
   { name: "wokku_restore_backup", description: "Restore a backup into its database. OVERWRITES live data — confirm with the user first.", inputSchema: { type: "object", properties: { database_id: { type: "string", description: "The database ID or name" }, backup_id: { type: "string", description: "The backup ID" } }, required: [ "database_id", "backup_id" ] } }

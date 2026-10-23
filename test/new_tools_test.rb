@@ -13,7 +13,7 @@ class NewToolsTest < Minitest::Test
     [ "wokku_get_run", { "app_id" => "a", "run_id" => "r1" }, "GET", "/api/v1/apps/a/runs/r1", nil ],
     [ "wokku_list_box_sizes", {}, "GET", "/api/v1/dyno_tiers", nil ],
     [ "wokku_get_dynos", { "app_id" => "a" }, "GET", "/api/v1/apps/a/dynos", nil ],
-    [ "wokku_resize_app", { "app_id" => "a", "dyno_id" => "y1", "box_size" => "standard" }, "PATCH", "/api/v1/apps/a/dynos/y1", { "dyno_tier_name" => "standard" } ],
+    [ "wokku_resize_app", { "app_id" => "a", "process_type" => "web", "cpu" => 0.5, "memory_mb" => 1024 }, "PATCH", "/api/v1/apps/a/ps", { "resources" => { "web" => { "cpu" => 0.5, "memory_mb" => 1024 } } } ],
     [ "wokku_get_backup_download_url", { "database_id" => "d", "backup_id" => "b" }, "GET", "/api/v1/databases/d/backups/b/download", nil ],
     [ "wokku_restore_backup", { "database_id" => "d", "backup_id" => "b" }, "POST", "/api/v1/databases/d/backups/b/restore", nil ],
     [ "wokku_scale_app", { "app_id" => "a", "scaling" => { "clock" => 1 } }, "PUT", "/api/v1/apps/a/ps", { "scaling" => { "clock" => 1 } } ]
@@ -56,6 +56,16 @@ class NewToolsTest < Minitest::Test
     assert_equal({ "command" => "echo hello" }, JSON.parse(@api.requests.first[:body]))
     assert_includes text, "hello"
     assert_includes text, "succeeded"
+  end
+
+  def test_run_command_without_run_id_makes_one_request
+    api = FakeApi.new("POST /api/v1/apps/b/run" => [ 202, {} ])
+    mcp = McpClient.new(api_url: "http://127.0.0.1:#{api.port}/api/v1")
+    mcp.call("wokku_run_command", { "app_id" => "b", "command" => "x" })
+    assert_equal 1, api.requests.size
+  ensure
+    mcp&.close
+    api&.stop
   end
 
   # Review focus 2: import streams the raw file, not JSON.
