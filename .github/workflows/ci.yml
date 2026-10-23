@@ -14,4 +14,5 @@ jobs:
         with:
           ruby-version: 3.4.3
       - run: ruby script/openapi_coverage.rb --self-test
+      - run: ruby -Itest -e 'Dir["test/*_test.rb"].each { |f| require_relative f }'
       - run: ruby script/openapi_coverage.rb https://wokku.cloud/api/v1/openapi.yaml "plugins/wokku/mcp/*.rb"
