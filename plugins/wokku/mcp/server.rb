@@ -44,7 +44,7 @@ NO_TOKEN_HINT = "No Wokku token found. Run `wokku auth:login` (one browser hop; 
 # Sent as X-Wokku-Client-Version on every request so the API's client_version
 # concern can flag outdated MCP servers (see MIN_VERSIONS in
 # app/controllers/concerns/client_version.rb) and /doctor can surface it.
-SERVER_VERSION = "1.5.0"
+SERVER_VERSION = "1.4.3"
 
 # Log endpoint to stderr so Claude Code's MCP debug logs show which
 # Wokku instance (managed vs self-hosted OSS) the plugin is talking to.
