@@ -1,2 +1,19 @@
-# operationIds this client intentionally does not expose (reviewed in sub-project 3).
-ignore: []
+# operationIds this client intentionally does not expose. The gate fails on any
+# other uncovered operation, and on entries that no longer exist in the contract.
+ignore:
+  - { id: servers.create, reason: system-admin only }
+  - { id: servers.destroy, reason: system-admin only }
+  - { id: billing.create_checkout, reason: browser payment flow }
+  - { id: billing.portal, reason: browser payment flow }
+  - { id: devices.create, reason: iOS push registration }
+  - { id: devices.delete, reason: iOS push registration }
+  - { id: meta.show, reason: client-internal metadata }
+  - { id: auth.login, reason: password login; MCP reuses the CLI token }
+  - { id: auth.logout, reason: MCP reuses the CLI token (wokku auth:logout) }
+  - { id: auth_devices.code, reason: MCP reuses the CLI token (wokku auth:login) }
+  - { id: auth_devices.token, reason: MCP reuses the CLI token (wokku auth:login) }
+  - { id: tunnel_authorize.create, reason: server-to-server hook called by the tunnel server }
+  - { id: tunnels.create, reason: needs a long-running local process; use the CLI }
+  - { id: tunnels.destroy, reason: needs a long-running local process; use the CLI }
+  - { id: dev_sessions.create, reason: needs a long-running local process; use the CLI }
+  - { id: dev_sessions.destroy, reason: needs a long-running local process; use the CLI }
