@@ -9,6 +9,7 @@ ignore:
   - { id: devices.delete, reason: iOS push registration }
   - { id: meta.show, reason: client-internal metadata }
   - { id: auth.login, reason: password login; MCP reuses the CLI token }
+  - { id: servers.dokku, reason: retired 410 raw passthrough (contract lacks deprecated flag) }
   - { id: auth.logout, reason: MCP reuses the CLI token (wokku auth:logout) }
   - { id: auth_devices.code, reason: MCP reuses the CLI token (wokku auth:login) }
   - { id: auth_devices.token, reason: MCP reuses the CLI token (wokku auth:login) }

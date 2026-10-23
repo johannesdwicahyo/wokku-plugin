@@ -44,12 +44,20 @@ NO_TOKEN_HINT = "No Wokku token found. Run `wokku auth:login` (one browser hop; 
 # Sent as X-Wokku-Client-Version on every request so the API's client_version
 # concern can flag outdated MCP servers (see MIN_VERSIONS in
 # app/controllers/concerns/client_version.rb) and /doctor can surface it.
-SERVER_VERSION = "1.4.3"
+SERVER_VERSION = "1.5.0"
 
 # Log endpoint to stderr so Claude Code's MCP debug logs show which
 # Wokku instance (managed vs self-hosted OSS) the plugin is talking to.
 $stderr.puts "wokku-mcp: connecting to #{WOKKU_API_URL} (#{WOKKU_API_URL.include?('wokku.cloud') ? 'managed' : 'self-hosted'})"
 $stderr.puts "wokku-mcp: token source: #{ENV["WOKKU_API_TOKEN"].to_s.empty? ? (WOKKU_API_TOKEN.empty? ? 'NONE' : '~/.wokku/config.json (CLI login)') : 'plugin env'}"
+
+def apply_wokku_headers(request, content_type)
+  request["Authorization"] = "Bearer #{WOKKU_API_TOKEN}"
+  request["Content-Type"] = content_type
+  request["User-Agent"] = "wokku-mcp/#{SERVER_VERSION}"
+  request["X-Wokku-Client"] = "mcp"
+  request["X-Wokku-Client-Version"] = SERVER_VERSION
+end
 
 def api_request(method, path, body = nil)
   # Short-circuit locally when unauthenticated: better than a network
@@ -70,11 +78,7 @@ def api_request(method, path, body = nil)
   when :delete then Net::HTTP::Delete.new(uri)
   end
 
-  request["Authorization"] = "Bearer #{WOKKU_API_TOKEN}"
-  request["Content-Type"] = "application/json"
-  request["User-Agent"] = "wokku-mcp/#{SERVER_VERSION}"
-  request["X-Wokku-Client"] = "mcp"
-  request["X-Wokku-Client-Version"] = SERVER_VERSION
+  apply_wokku_headers(request, "application/json")
   request.body = body.to_json if body
 
   response = http.request(request)
@@ -85,6 +89,56 @@ rescue Errno::ECONNREFUSED
   { error: "Cannot connect to #{WOKKU_API_URL} — is the server running?" }
 rescue => e
   { error: e.message }
+end
+
+# Raw-body POST (databases.import takes the dump as application/octet-stream).
+# Streams the file instead of reading it into memory — dumps can be GBs.
+def api_upload(method, path, file_path)
+  return { error: "Missing Wokku token", error_code: "missing_token", hint: NO_TOKEN_HINT } if WOKKU_API_TOKEN.empty?
+  return { error: "uploads are POST only" } unless method == :post
+  return { error: "file not found: #{file_path}" } unless File.file?(file_path.to_s)
+
+  uri = URI("#{WOKKU_API_URL}#{path}")
+  http = Net::HTTP.new(uri.host, uri.port)
+  http.use_ssl = uri.scheme == "https"
+  http.open_timeout = 10
+  http.read_timeout = 900
+
+  request = Net::HTTP::Post.new(uri)
+  apply_wokku_headers(request, "application/octet-stream")
+  File.open(file_path, "rb") do |f|
+    request["Content-Length"] = f.size.to_s
+    request.body_stream = f
+    response = http.request(request)
+    return(JSON.parse(response.body) rescue response.body)
+  end
+rescue Net::OpenTimeout, Net::ReadTimeout => e
+  { error: "Request timed out: #{e.message}" }
+rescue Errno::ECONNREFUSED
+  { error: "Cannot connect to #{WOKKU_API_URL} — is the server running?" }
+rescue => e
+  { error: e.message }
+end
+
+# apps.run is async: POST returns 202 {run_id}; poll runs.show to a terminal
+# status so the model sees the real output and exit code, not "queued".
+RUN_POLL_INTERVAL = 2
+RUN_POLL_MAX_ATTEMPTS = 300 # ~10 minutes
+TERMINAL_RUN_STATUSES = %w[succeeded failed].freeze
+
+def run_command(args)
+  started = api_request(:post, "/apps/#{args['app_id']}/run", { command: args["command"] })
+  return started if error_result?(started) || !started.is_a?(Hash)
+
+  run_id = started["run_id"]
+  result = nil
+  RUN_POLL_MAX_ATTEMPTS.times do |i|
+    result = api_request(:get, "/apps/#{args['app_id']}/runs/#{run_id}")
+    return result if error_result?(result) || TERMINAL_RUN_STATUSES.include?(result["status"].to_s)
+
+    sleep RUN_POLL_INTERVAL if i < RUN_POLL_MAX_ATTEMPTS - 1
+  end
+  { run_id: run_id, status: result&.dig("status"), note: "Still running after ~10 minutes. Check later with wokku_get_run." }
 end
 
 # wokku_deploy_tarball — Track A Phase 4a Task 6. Deploys a local directory
@@ -311,7 +365,7 @@ def handle_tool(name, args)
   when "wokku_rollback" then api_request(:post, "/apps/#{args['app_id']}/releases/#{args['release_id']}/rollback")
   when "wokku_get_ps" then api_request(:get, "/apps/#{args['app_id']}/ps")
   when "wokku_scale_app"
-    scaling = {}
+    scaling = (args["scaling"] || {}).dup
     scaling["web"] = args["web"] if args["web"]
     scaling["worker"] = args["worker"] if args["worker"]
     api_request(:put, "/apps/#{args['app_id']}/ps", { scaling: scaling })
@@ -377,12 +431,32 @@ def handle_tool(name, args)
   when "wokku_get_app_vitals" then api_request(:get, "/apps/#{args['app_id']}/vitals")
   when "wokku_get_database_monitor" then api_request(:get, "/databases/#{args['database_id']}/monitor")
   when "wokku_get_current_plan" then api_request(:get, "/billing/current_plan")
+  when "wokku_whoami" then api_request(:get, "/auth/whoami")
+  when "wokku_list_api_tokens" then api_request(:get, "/auth/tokens")
+  when "wokku_create_api_token"
+    body = { name: args["name"] }
+    body[:expires_at] = args["expires_at"] if args["expires_at"]
+    api_request(:post, "/auth/tokens", body)
+  when "wokku_revoke_api_token" then api_request(:delete, "/auth/tokens/#{args['token_id']}")
+  when "wokku_ai_diagnose" then api_request(:post, "/ai/diagnose", { deploy_id: args["deploy_id"] })
+  when "wokku_run_command" then run_command(args)
+  when "wokku_get_run" then api_request(:get, "/apps/#{args['app_id']}/runs/#{args['run_id']}")
+  when "wokku_list_box_sizes" then api_request(:get, "/dyno_tiers")
+  when "wokku_get_dynos" then api_request(:get, "/apps/#{args['app_id']}/dynos")
+  when "wokku_resize_app"
+    body = {}
+    body[:dyno_tier_name] = args["box_size"] if args["box_size"]
+    body[:count] = args["count"] if args["count"]
+    api_request(:patch, "/apps/#{args['app_id']}/dynos/#{args['dyno_id']}", body)
+  when "wokku_import_database" then api_upload(:post, "/databases/#{args['database_id']}/import", args["file_path"])
+  when "wokku_get_backup_download_url" then api_request(:get, "/databases/#{args['database_id']}/backups/#{args['backup_id']}/download")
+  when "wokku_restore_backup" then api_request(:post, "/databases/#{args['database_id']}/backups/#{args['backup_id']}/restore")
   else
     { error: "Unknown tool: #{name}" }
   end
 end
 
-# Tool definitions — 79 tools, 100% coverage of Wokku API v1
+# Tool definitions — 92 tools; scripts/openapi_coverage.rb --gate keeps them in step with the API
 TOOLS = [
   { name: "wokku_doctor", description: "Whole-chain self-diagnosis: auth, client version, host health, and app state in one call. Run this first when anything is failing or confusing, before digging into individual tools.", inputSchema: { type: "object", properties: {} } },
   { name: "wokku_list_servers", description: "List all connected servers", inputSchema: { type: "object", properties: {} } },
@@ -408,7 +482,7 @@ TOOLS = [
   { name: "wokku_get_release", description: "Get release details", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" }, release_id: { type: "string", description: "The release ID" } }, required: [ "app_id", "release_id" ] } },
   { name: "wokku_rollback", description: "Rollback to a previous release", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" }, release_id: { type: "string", description: "The release ID" } }, required: [ "app_id", "release_id" ] } },
   { name: "wokku_get_ps", description: "Get process/dyno info", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" } }, required: [ "app_id" ] } },
-  { name: "wokku_scale_app", description: "Scale web/worker dynos", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" }, web: { type: "integer", description: "Web dynos" }, worker: { type: "integer", description: "Worker dynos" } }, required: [ "app_id" ] } },
+  { name: "wokku_scale_app", description: "Scale process counts. Use web/worker shorthands or `scaling` for any process type from the Procfile.", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID or name" }, web: { type: "integer", description: "Number of web processes" }, worker: { type: "integer", description: "Number of worker processes" }, scaling: { type: "object", description: "Process type => count, e.g. {\"clock\": 1}" } }, required: [ "app_id" ] } },
   { name: "wokku_get_checks", description: "Get health check config", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" } }, required: [ "app_id" ] } },
   { name: "wokku_update_checks", description: "Update health checks", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" }, checks: { type: "object", description: "Health check settings" } }, required: [ "app_id", "checks" ] } },
   { name: "wokku_get_logs", description: "Get application logs", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID" }, lines: { type: "integer", description: "Number of lines (default: 100)" } }, required: [ "app_id" ] } },
@@ -462,7 +536,20 @@ TOOLS = [
   { name: "wokku_get_app_monitor", description: "Get HTTP request stats for an app (last 24h: totals, 5-min buckets, slowest URLs). Read-only.", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID or name" } }, required: [ "app_id" ] } },
   { name: "wokku_get_app_vitals", description: "Get Core Web Vitals (CLS/LCP/INP/FCP/TTFB) p50/p75/p95 for an app over the last 7 days. Read-only.", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID or name" } }, required: [ "app_id" ] } },
   { name: "wokku_get_database_monitor", description: "Get the latest database stats snapshot (connections, cache hit ratio, size, top queries). Read-only.", inputSchema: { type: "object", properties: { database_id: { type: "string", description: "The database ID or name" } }, required: [ "database_id" ] } },
-  { name: "wokku_get_current_plan", description: "Get the current Wokku plan and its limits.", inputSchema: { type: "object", properties: {} } }
+  { name: "wokku_get_current_plan", description: "Get the current Wokku plan and its limits.", inputSchema: { type: "object", properties: {} } },
+  { name: "wokku_whoami", description: "Show the signed-in Wokku user.", inputSchema: { type: "object", properties: {} } },
+  { name: "wokku_list_api_tokens", description: "List the user's API tokens (values are never shown again).", inputSchema: { type: "object", properties: {} } },
+  { name: "wokku_create_api_token", description: "Create an API token. The token value is returned once — show it to the user.", inputSchema: { type: "object", properties: { name: { type: "string", description: "Token name" }, expires_at: { type: "string", description: "Optional ISO 8601 expiry" } }, required: [ "name" ] } },
+  { name: "wokku_revoke_api_token", description: "Revoke an API token. Anything using it stops working immediately.", inputSchema: { type: "object", properties: { token_id: { type: "string", description: "The token ID" } }, required: [ "token_id" ] } },
+  { name: "wokku_ai_diagnose", description: "Ask Wokku's AI to diagnose a failed deploy from its build log.", inputSchema: { type: "object", properties: { deploy_id: { type: "string", description: "The deploy ID (see wokku_list_deploys)" } }, required: [ "deploy_id" ] } },
+  { name: "wokku_run_command", description: "Run a one-off command in a fresh container for the app and wait for its output and exit code (up to ~10 minutes).", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID or name" }, command: { type: "string", description: "Command, e.g. 'bin/rails db:migrate'" } }, required: [ "app_id", "command" ] } },
+  { name: "wokku_get_run", description: "Get the status/output of a one-off run started by wokku_run_command.", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID or name" }, run_id: { type: "string", description: "The run ID" } }, required: [ "app_id", "run_id" ] } },
+  { name: "wokku_list_box_sizes", description: "List available box sizes (CPU/memory tiers) and prices.", inputSchema: { type: "object", properties: {} } },
+  { name: "wokku_get_dynos", description: "List an app's process allocations (process type, count, box size, monthly cost).", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID or name" } }, required: [ "app_id" ] } },
+  { name: "wokku_resize_app", description: "Change an allocation's box size and/or count. Changes cost — confirm with the user. Get dyno_id from wokku_get_dynos.", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID or name" }, dyno_id: { type: "string", description: "Allocation ID from wokku_get_dynos" }, box_size: { type: "string", description: "Box size name from wokku_list_box_sizes" }, count: { type: "integer", description: "Process count (>= 1)" } }, required: [ "app_id", "dyno_id" ] } },
+  { name: "wokku_import_database", description: "Import a dump file (e.g. pg_dump -Fc) into a database. OVERWRITES live data — confirm with the user first.", inputSchema: { type: "object", properties: { database_id: { type: "string", description: "The database ID or name" }, file_path: { type: "string", description: "Absolute path to the local dump file" } }, required: [ "database_id", "file_path" ] } },
+  { name: "wokku_get_backup_download_url", description: "Get a short-lived download URL for a database backup.", inputSchema: { type: "object", properties: { database_id: { type: "string", description: "The database ID or name" }, backup_id: { type: "string", description: "The backup ID (see wokku_list_backups)" } }, required: [ "database_id", "backup_id" ] } },
+  { name: "wokku_restore_backup", description: "Restore a backup into its database. OVERWRITES live data — confirm with the user first.", inputSchema: { type: "object", properties: { database_id: { type: "string", description: "The database ID or name" }, backup_id: { type: "string", description: "The backup ID" } }, required: [ "database_id", "backup_id" ] } }
 ].freeze
 
 # Turns a tool result into the text shown to Claude. Plain {error: "msg"}

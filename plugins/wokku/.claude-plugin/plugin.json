@@ -1,6 +1,6 @@
 {
   "name": "wokku",
-  "version": "1.4.3",
+  "version": "1.5.0",
   "description": "Deploy and manage apps on Wokku \u2014 the managed Heroku alternative. 57 tools for apps, databases, domains, SSL, backups, and Bundle v2 box/shared-addon/dedicated-upgrade flows.",
   "author": {
     "name": "Johannes Dwicahyo",
