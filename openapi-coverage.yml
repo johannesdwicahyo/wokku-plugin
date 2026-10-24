@@ -7,6 +7,7 @@ ignore:
   - { id: billing.portal, reason: browser payment flow }
   - { id: devices.create, reason: iOS push registration }
   - { id: devices.delete, reason: iOS push registration }
+  - { id: auth.apple, reason: iOS Sign in with Apple }
   - { id: meta.show, reason: client-internal metadata }
   - { id: auth.login, reason: password login; MCP reuses the CLI token }
   - { id: auth.logout, reason: MCP reuses the CLI token (wokku auth:logout) }
