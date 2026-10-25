@@ -8,6 +8,7 @@ ignore:
   - { id: devices.create, reason: iOS push registration }
   - { id: devices.delete, reason: iOS push registration }
   - { id: auth.apple, reason: iOS Sign in with Apple }
+  - { id: auth.mobile_token, reason: iOS web sign-in handoff }
   - { id: meta.show, reason: client-internal metadata }
   - { id: auth.login, reason: password login; MCP reuses the CLI token }
   - { id: auth.logout, reason: MCP reuses the CLI token (wokku auth:logout) }
