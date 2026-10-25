@@ -19,3 +19,4 @@ ignore:
   - { id: tunnels.destroy, reason: needs a long-running local process; use the CLI }
   - { id: dev_sessions.create, reason: needs a long-running local process; use the CLI }
   - { id: dev_sessions.destroy, reason: needs a long-running local process; use the CLI }
+  - { id: account_deletion.create, reason: in-app account deletion (App Store); dashboard covers it }
