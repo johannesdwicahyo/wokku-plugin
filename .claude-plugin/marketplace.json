@@ -14,7 +14,7 @@
     {
       "name": "wokku",
       "source": "./plugins/wokku",
-      "description": "Deploy and manage apps on Wokku with 97 tools and guided workflows",
+      "description": "Deploy and manage apps on Wokku with 106 tools and guided workflows",
       "version": "1.6.0",
       "author": {
         "name": "Johannes Dwicahyo"

@@ -461,12 +461,22 @@ def handle_tool(name, args)
   when "wokku_import_database" then api_upload(:post, "/databases/#{args['database_id']}/import", args["file_path"])
   when "wokku_get_backup_download_url" then api_request(:get, "/databases/#{args['database_id']}/backups/#{args['backup_id']}/download")
   when "wokku_restore_backup" then api_request(:post, "/databases/#{args['database_id']}/backups/#{args['backup_id']}/restore")
+  when "wokku_list_transfers" then api_request(:get, "/app_transfers")
+  when "wokku_accept_transfer" then api_request(:post, "/app_transfers/#{args['transfer_id']}/accept")
+  when "wokku_decline_transfer" then api_request(:post, "/app_transfers/#{args['transfer_id']}/decline")
+  when "wokku_cancel_transfer" then api_request(:delete, "/app_transfers/#{args['transfer_id']}")
+  when "wokku_update_team_member" then api_request(:patch, "/teams/#{args['team_id']}/members/#{args['member_id']}", { role: args["role"] })
+  when "wokku_test_notification" then api_request(:post, "/notifications/#{args['notification_id']}/test")
+  when "wokku_resize_database"
+    api_request(:patch, "/databases/#{args['database_id']}/resize", args.slice("cpu", "memory_mb", "disk_gb"))
+  when "wokku_retry_database" then api_request(:post, "/databases/#{args['database_id']}/retry")
+  when "wokku_list_invoices" then api_request(:get, "/billing/invoices")
   else
     { error: "Unknown tool: #{name}" }
   end
 end
 
-# Tool definitions — 92 tools; scripts/openapi_coverage.rb --gate keeps them in step with the API
+# Tool definitions — 106 tools; scripts/openapi_coverage.rb --gate keeps them in step with the API
 TOOLS = [
   { name: "wokku_doctor", description: "Whole-chain self-diagnosis: auth, client version, host health, and app state in one call. Run this first when anything is failing or confusing, before digging into individual tools.", inputSchema: { type: "object", properties: {} } },
   { name: "wokku_list_servers", description: "List all connected servers", inputSchema: { type: "object", properties: {} } },
@@ -564,7 +574,16 @@ TOOLS = [
   { name: "wokku_resize_app", description: "Change a process type's CPU/memory shape (per-resource pricing). Changes cost — confirm with the user. See wokku_get_dynos for current shapes.", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID or name" }, process_type: { type: "string", description: "Process type, e.g. web" }, cpu: { type: "number", description: "CPU (vCPU, e.g. 0.5)" }, memory_mb: { type: "integer", description: "Memory in MB" } }, required: [ "app_id", "process_type" ] } },
   { name: "wokku_import_database", description: "Import a dump file (e.g. pg_dump -Fc) into a database. OVERWRITES live data — confirm with the user first.", inputSchema: { type: "object", properties: { database_id: { type: "string", description: "The database ID or name" }, file_path: { type: "string", description: "Absolute path to the local dump file" } }, required: [ "database_id", "file_path" ] } },
   { name: "wokku_get_backup_download_url", description: "Get a short-lived download URL for a database backup.", inputSchema: { type: "object", properties: { database_id: { type: "string", description: "The database ID or name" }, backup_id: { type: "string", description: "The backup ID (see wokku_list_backups)" } }, required: [ "database_id", "backup_id" ] } },
-  { name: "wokku_restore_backup", description: "Restore a backup into its database. OVERWRITES live data — confirm with the user first.", inputSchema: { type: "object", properties: { database_id: { type: "string", description: "The database ID or name" }, backup_id: { type: "string", description: "The backup ID" } }, required: [ "database_id", "backup_id" ] } }
+  { name: "wokku_restore_backup", description: "Restore a backup into its database. OVERWRITES live data — confirm with the user first.", inputSchema: { type: "object", properties: { database_id: { type: "string", description: "The database ID or name" }, backup_id: { type: "string", description: "The backup ID" } }, required: [ "database_id", "backup_id" ] } },
+  { name: "wokku_list_transfers", description: "List pending app transfers: incoming (waiting for you to accept or decline) and outgoing (you started them).", inputSchema: { type: "object", properties: {} } },
+  { name: "wokku_accept_transfer", description: "Accept an app transferred to you. The app moves to your account and its billing becomes yours — confirm with the user first.", inputSchema: { type: "object", properties: { transfer_id: { type: "string", description: "Transfer ID from wokku_list_transfers" } }, required: [ "transfer_id" ] } },
+  { name: "wokku_decline_transfer", description: "Decline an app transferred to you.", inputSchema: { type: "object", properties: { transfer_id: { type: "string", description: "Transfer ID from wokku_list_transfers" } }, required: [ "transfer_id" ] } },
+  { name: "wokku_cancel_transfer", description: "Cancel an app transfer you started, before the recipient answers.", inputSchema: { type: "object", properties: { transfer_id: { type: "string", description: "Transfer ID from wokku_list_transfers" } }, required: [ "transfer_id" ] } },
+  { name: "wokku_update_team_member", description: "Change a team member's role (team admins only). A team always keeps at least one admin.", inputSchema: { type: "object", properties: { team_id: { type: "string", description: "The team ID" }, member_id: { type: "string", description: "Membership ID from wokku_list_team_members" }, role: { type: "string", enum: %w[viewer member admin], description: "New role" } }, required: [ "team_id", "member_id", "role" ] } },
+  { name: "wokku_test_notification", description: "Send a sample message to a notification channel now, to check its configuration.", inputSchema: { type: "object", properties: { notification_id: { type: "string", description: "Notification ID from wokku_list_notifications" } }, required: [ "notification_id" ] } },
+  { name: "wokku_resize_database", description: "Resize a dedicated database (CPU, memory, disk). Disk can only grow; billed per resource. Applied by a background job with a brief restart.", inputSchema: { type: "object", properties: { database_id: { type: "string", description: "Database ID or name" }, cpu: { type: "string", description: "vCPU, e.g. 0.25, 0.5, 1" }, memory_mb: { type: "integer", description: "Memory in MB" }, disk_gb: { type: "integer", description: "Disk in GB (must not shrink)" } }, required: [ "database_id", "cpu", "memory_mb", "disk_gb" ] } },
+  { name: "wokku_retry_database", description: "Retry provisioning a database stuck in error. It must be linked to an app.", inputSchema: { type: "object", properties: { database_id: { type: "string", description: "Database ID or name" } }, required: [ "database_id" ] } },
+  { name: "wokku_list_invoices", description: "List the user's invoices (amounts in IDR). Unpaid ones include a pay_url to open in the dashboard; payment can't be made through this tool.", inputSchema: { type: "object", properties: {} } }
 ].freeze
 
 # Turns a tool result into the text shown to Claude. Plain {error: "msg"}
