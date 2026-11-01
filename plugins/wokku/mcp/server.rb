@@ -471,12 +471,18 @@ def handle_tool(name, args)
     api_request(:patch, "/databases/#{args['database_id']}/resize", args.slice("cpu", "memory_mb", "disk_gb"))
   when "wokku_retry_database" then api_request(:post, "/databases/#{args['database_id']}/retry")
   when "wokku_list_invoices" then api_request(:get, "/billing/invoices")
+  when "wokku_set_preview_settings"
+    api_request(:patch, "/apps/#{args['app_id']}/preview_settings", args.slice("preview_enabled", "database_strategy"))
+  when "wokku_list_github_repos"
+    path = args["repo"] ? "/github/repos?#{URI.encode_www_form(repo: args['repo'])}" : "/github/repos"
+    api_request(:get, path)
+  when "wokku_rotate_vitals_token" then api_request(:post, "/apps/#{args['app_id']}/vitals/rotate_token")
   else
     { error: "Unknown tool: #{name}" }
   end
 end
 
-# Tool definitions — 106 tools; scripts/openapi_coverage.rb --gate keeps them in step with the API
+# Tool definitions — 109 tools; scripts/openapi_coverage.rb --gate keeps them in step with the API
 TOOLS = [
   { name: "wokku_doctor", description: "Whole-chain self-diagnosis: auth, client version, host health, and app state in one call. Run this first when anything is failing or confusing, before digging into individual tools.", inputSchema: { type: "object", properties: {} } },
   { name: "wokku_list_servers", description: "List all connected servers", inputSchema: { type: "object", properties: {} } },
@@ -583,7 +589,10 @@ TOOLS = [
   { name: "wokku_test_notification", description: "Send a sample message to a notification channel now, to check its configuration.", inputSchema: { type: "object", properties: { notification_id: { type: "string", description: "Notification ID from wokku_list_notifications" } }, required: [ "notification_id" ] } },
   { name: "wokku_resize_database", description: "Resize a dedicated database (CPU, memory, disk). Disk can only grow; billed per resource. Applied by a background job with a brief restart.", inputSchema: { type: "object", properties: { database_id: { type: "string", description: "Database ID or name" }, cpu: { type: "string", description: "vCPU, e.g. 0.25, 0.5, 1" }, memory_mb: { type: "integer", description: "Memory in MB" }, disk_gb: { type: "integer", description: "Disk in GB (must not shrink)" } }, required: [ "database_id", "cpu", "memory_mb", "disk_gb" ] } },
   { name: "wokku_retry_database", description: "Retry provisioning a database stuck in error. It must be linked to an app.", inputSchema: { type: "object", properties: { database_id: { type: "string", description: "Database ID or name" } }, required: [ "database_id" ] } },
-  { name: "wokku_list_invoices", description: "List the user's invoices (amounts in IDR). Unpaid ones include a pay_url to open in the dashboard; payment can't be made through this tool.", inputSchema: { type: "object", properties: {} } }
+  { name: "wokku_list_invoices", description: "List the user's invoices (amounts in IDR). Unpaid ones include a pay_url to open in the dashboard; payment can't be made through this tool.", inputSchema: { type: "object", properties: {} } },
+  { name: "wokku_set_preview_settings", description: "Turn PR preview apps on or off for an app and choose each preview's database: empty, snapshot (copy of production) or shared (uses production data; destructive migrations affect production — confirm with the user).", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID or name" }, preview_enabled: { type: "boolean", description: "Create a preview app for each pull request" }, database_strategy: { type: "string", enum: %w[empty snapshot shared], description: "Database for each preview" } }, required: [ "app_id" ] } },
+  { name: "wokku_list_github_repos", description: "List GitHub repos the Wokku GitHub App can see (to pick one for wokku_github_connect), or pass repo to list its branches.", inputSchema: { type: "object", properties: { repo: { type: "string", description: "owner/name — list this repo's branches instead" } } } },
+  { name: "wokku_rotate_vitals_token", description: "Issue a new web-vitals ingest token for an app; the old token stops working, so the site's vitals snippet must be updated.", inputSchema: { type: "object", properties: { app_id: { type: "string", description: "The app ID or name" } }, required: [ "app_id" ] } }
 ].freeze
 
 # Turns a tool result into the text shown to Claude. Plain {error: "msg"}
