@@ -474,8 +474,11 @@ def handle_tool(name, args)
   when "wokku_set_preview_settings"
     api_request(:patch, "/apps/#{args['app_id']}/preview_settings", args.slice("preview_enabled", "database_strategy"))
   when "wokku_list_github_repos"
-    path = args["repo"] ? "/github/repos?#{URI.encode_www_form(repo: args['repo'])}" : "/github/repos"
-    api_request(:get, path)
+    if args["repo"]
+      api_request(:get, "/github/repos?#{URI.encode_www_form(repo: args['repo'])}")
+    else
+      api_request(:get, "/github/repos")
+    end
   when "wokku_rotate_vitals_token" then api_request(:post, "/apps/#{args['app_id']}/vitals/rotate_token")
   else
     { error: "Unknown tool: #{name}" }
