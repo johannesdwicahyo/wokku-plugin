@@ -47,7 +47,7 @@ Once installed, you can ask Claude things like:
 
 The May release of [Wokku](https://github.com/johannesdwicahyo/wokku)
 introduced shared-engine add-ons (today: Postgres / MariaDB / Redis) plus a
-dedicated-upgrade flow. The plugin's MCP tools (current names, v1.6.0):
+dedicated-upgrade flow. The plugin's MCP tools (current names, v1.8.1):
 
 - `wokku_list_incidents`, `wokku_get_incident` (outages)
 - `wokku_list_alert_mutes`, `wokku_mute_alerts`, `wokku_unmute_alerts` (phone push mutes)

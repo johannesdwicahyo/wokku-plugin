@@ -44,7 +44,7 @@ NO_TOKEN_HINT = "No Wokku token found. Run `wokku auth:login` (one browser hop; 
 # Sent as X-Wokku-Client-Version on every request so the API's client_version
 # concern can flag outdated MCP servers (see MIN_VERSIONS in
 # app/controllers/concerns/client_version.rb) and /doctor can surface it.
-SERVER_VERSION = "1.6.0"
+SERVER_VERSION = "1.8.1"
 
 # Log endpoint to stderr so Claude Code's MCP debug logs show which
 # Wokku instance (managed vs self-hosted OSS) the plugin is talking to.
@@ -359,7 +359,7 @@ def handle_tool(name, args)
   when "wokku_set_config" then api_request(:put, "/apps/#{args['app_id']}/config", { vars: args["vars"] })
   when "wokku_unset_config" then api_request(:delete, "/apps/#{args['app_id']}/config", { keys: args["keys"] })
   when "wokku_list_domains" then api_request(:get, "/apps/#{args['app_id']}/domains")
-  when "wokku_add_domain" then api_request(:post, "/apps/#{args['app_id']}/domains", { domain: args["domain"] })
+  when "wokku_add_domain" then api_request(:post, "/apps/#{args['app_id']}/domains", { hostname: args["domain"] })
   when "wokku_remove_domain" then api_request(:delete, "/apps/#{args['app_id']}/domains/#{args['domain_id']}")
   when "wokku_enable_ssl" then api_request(:post, "/apps/#{args['app_id']}/domains/#{args['domain_id']}/ssl")
   when "wokku_list_releases" then api_request(:get, "/apps/#{args['app_id']}/releases")

@@ -7,6 +7,7 @@ class RestoredToolsTest < Minitest::Test
     [ "wokku_rename_app", { "app_id" => "a", "new_name" => "b" }, "PATCH", "/api/v1/apps/a/rename", { "name" => "b" } ],
     [ "wokku_clone_app", { "app_id" => "a", "new_name" => "b" }, "POST", "/api/v1/apps/a/clone", { "name" => "b", "skip_deploy" => true } ],
     [ "wokku_transfer_app", { "app_id" => "a", "recipient_email" => "x@y.z" }, "POST", "/api/v1/apps/a/transfer", { "recipient_email" => "x@y.z" } ],
+    [ "wokku_add_domain", { "app_id" => "a", "domain" => "x.example.com" }, "POST", "/api/v1/apps/a/domains", { "hostname" => "x.example.com" } ],
     [ "wokku_lock_app", { "app_id" => "a" }, "POST", "/api/v1/apps/a/lock", nil ],
     [ "wokku_unlock_app", { "app_id" => "a" }, "POST", "/api/v1/apps/a/unlock", nil ],
     [ "wokku_set_https", { "app_id" => "a", "enabled" => false }, "PATCH", "/api/v1/apps/a/https", { "enabled" => false } ],
