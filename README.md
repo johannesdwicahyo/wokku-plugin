@@ -25,7 +25,7 @@ Deploy and manage apps on Wokku Cloud directly from Claude Code using natural la
 
 You'll be prompted for:
 - `WOKKU_API_URL` — defaults to `https://wokku.cloud/api/v1`
-- `WOKKU_API_TOKEN` — create one at [wokku.cloud/dashboard/profile](https://wokku.cloud/dashboard/profile)
+- `WOKKU_API_TOKEN` — create one at [wokku.cloud/dashboard/profile](https://wokku.cloud/dashboard/profile). Pick **Read-only** if Claude should only look (logs, status, config keys), **Full access** to let it deploy and change things. The plugin never uses your `wokku` CLI login.
 
 Restart Claude Code to load the plugin.
 
@@ -47,7 +47,7 @@ Once installed, you can ask Claude things like:
 
 The May release of [Wokku](https://github.com/johannesdwicahyo/wokku)
 introduced shared-engine add-ons (today: Postgres / MariaDB / Redis) plus a
-dedicated-upgrade flow. The plugin's MCP tools (current names, v1.8.1):
+dedicated-upgrade flow. The plugin's MCP tools (current names, v1.9.0):
 
 - `wokku_list_incidents`, `wokku_get_incident` (outages)
 - `wokku_list_alert_mutes`, `wokku_mute_alerts`, `wokku_unmute_alerts` (phone push mutes)
