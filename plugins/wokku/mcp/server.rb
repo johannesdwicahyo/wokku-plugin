@@ -20,36 +20,24 @@ require "tmpdir"
 
 WOKKU_API_URL = ENV.fetch("WOKKU_API_URL", "https://wokku.cloud/api/v1")
 
-# Token resolution: explicit env wins, then the wokku CLI's saved login
-# (~/.wokku/config.json, written by `wokku auth:login`'s device flow).
-# The MCP server runs on the user's machine, so one browser-hop login
-# authenticates BOTH surfaces — no manual token pasting for MCP.
-WOKKU_API_TOKEN = begin
-  env_token = ENV.fetch("WOKKU_API_TOKEN", "")
-  if !env_token.empty?
-    env_token
-  else
-    cli_config = File.join(Dir.home, ".wokku", "config.json")
-    if File.readable?(cli_config)
-      JSON.parse(File.read(cli_config))["token"].to_s rescue ""
-    else
-      ""
-    end
-  end
-end
-NO_TOKEN_HINT = "No Wokku token found. Run `wokku auth:login` (one browser hop; saves to " \
-                "~/.wokku/config.json, which this MCP server reads too) or set WOKKU_API_TOKEN " \
-                "in the plugin env.".freeze
+# Only the token the user put in the plugin config. The CLI's saved login
+# (~/.wokku/config.json) is a full-access token and is deliberately NOT
+# adopted: an agent gets exactly the access the user chose for it
+# (security assessment 2026-11-19, F-02).
+WOKKU_API_TOKEN = ENV.fetch("WOKKU_API_TOKEN", "")
+NO_TOKEN_HINT = "No Wokku token configured for this plugin. Create one at wokku.cloud/dashboard/profile " \
+                "(Read-only if Claude should only look; Full access to let it deploy and change things), " \
+                "then set it as the plugin's WOKKU_API_TOKEN (/plugin → wokku → configure).".freeze
 
 # Sent as X-Wokku-Client-Version on every request so the API's client_version
 # concern can flag outdated MCP servers (see MIN_VERSIONS in
 # app/controllers/concerns/client_version.rb) and /doctor can surface it.
-SERVER_VERSION = "1.8.1"
+SERVER_VERSION = "1.9.0"
 
 # Log endpoint to stderr so Claude Code's MCP debug logs show which
 # Wokku instance (managed vs self-hosted OSS) the plugin is talking to.
 $stderr.puts "wokku-mcp: connecting to #{WOKKU_API_URL} (#{WOKKU_API_URL.include?('wokku.cloud') ? 'managed' : 'self-hosted'})"
-$stderr.puts "wokku-mcp: token source: #{ENV["WOKKU_API_TOKEN"].to_s.empty? ? (WOKKU_API_TOKEN.empty? ? 'NONE' : '~/.wokku/config.json (CLI login)') : 'plugin env'}"
+$stderr.puts "wokku-mcp: token source: #{WOKKU_API_TOKEN.empty? ? 'NONE' : 'plugin config'}"
 
 def apply_wokku_headers(request, content_type)
   request["Authorization"] = "Bearer #{WOKKU_API_TOKEN}"

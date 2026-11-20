@@ -50,8 +50,8 @@ end
 
 # Drives server.rb over stdio JSON-RPC, as Claude Code does.
 class McpClient
-  def initialize(api_url:)
-    env = { "WOKKU_API_URL" => api_url, "WOKKU_API_TOKEN" => "test-token" }
+  def initialize(api_url:, env: {})
+    env = { "WOKKU_API_URL" => api_url, "WOKKU_API_TOKEN" => "test-token" }.merge(env)
     @stdin, @stdout, @stderr, @wait = Open3.popen3(env, "ruby", SERVER)
     @id = 0
     rpc("initialize", {})

@@ -1,6 +1,6 @@
 {
   "name": "wokku",
-  "version": "1.8.1",
+  "version": "1.9.0",
   "description": "Deploy and manage apps on Wokku \u2014 the managed Heroku alternative. 109 tools for apps, databases, domains, SSL, backups, and Bundle v2 box/shared-addon/dedicated-upgrade flows.",
   "author": {
     "name": "Johannes Dwicahyo",
@@ -19,7 +19,7 @@
     "WOKKU_API_TOKEN": {
       "type": "string",
       "title": "Wokku API Token",
-      "description": "Your Wokku API token (create one at wokku.cloud/dashboard/profile). The API endpoint is fixed to wokku.cloud.",
+      "description": "A Wokku API token for Claude (create one at wokku.cloud/dashboard/profile). Choose Read-only if Claude should only look, Full access to let it deploy and change things. The API endpoint is fixed to wokku.cloud.",
       "sensitive": true
     }
   }
